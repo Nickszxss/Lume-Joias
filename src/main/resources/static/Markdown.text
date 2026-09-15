@@ -1,0 +1,238 @@
+# Sistema de Gerenciamento de Estoque
+
+## 1. Cenário
+
+Uma empresa possui **5 filiais** e precisa de um software para controlar o estoque de produtos de cada uma delas.
+
+O sistema deverá permitir que a empresa acompanhe a quantidade disponível de cada produto, saiba quando um estoque está **suficiente, baixo ou zerado** e registre todas as alterações realizadas no estoque.
+
+Cada movimentação de produto entre filiais deverá ser registrada, informando **de qual filial o produto saiu, para qual filial foi enviado e qual foi a quantidade movimentada**.
+
+O sistema também terá dois níveis de acesso:
+
+-   **Gerente:** poderá visualizar e administrar as informações das 5 filiais.
+    
+-   **Funcionário:** poderá visualizar e controlar somente o estoque da filial em que trabalha.
+    
+
+Tanto o gerente quanto o funcionário poderão solicitar movimentações de estoque entre filiais. Porém, **somente o gerente poderá realizar pedidos de compra para reposição de produtos**.
+
+O funcionário terá como uma de suas principais funções manter o estoque atualizado. Por exemplo, após a venda de um produto, o funcionário deverá acessar o sistema e **diminuir a quantidade disponível daquele produto no estoque**. Da mesma forma, caso novos produtos sejam recebidos, poderá aumentar a quantidade registrada.
+
+----------
+
+## 2. Problema a ser resolvido
+
+A empresa precisa de uma forma centralizada e organizada de controlar o estoque de suas 5 filiais.
+
+Sem um sistema de controle, pode ser difícil saber:
+
+-   Quanto de cada produto está disponível em cada filial.
+    
+-   Quais produtos estão acabando.
+    
+-   Quais produtos estão zerados.
+    
+-   Quando e por que a quantidade de um produto foi alterada.
+    
+-   De qual filial um produto saiu e para qual filial foi enviado.
+    
+-   Quais produtos precisam ser repostos.
+    
+-   Qual filial possui maior ou menor movimentação de estoque.
+    
+-   Quem realizou determinada alteração no estoque.
+    
+
+O principal problema é **manter as informações do estoque atualizadas e permitir que a empresa acompanhe todas as movimentações realizadas nas filiais**.
+
+----------
+
+## 3. Escopo — Sugestão de uma solução
+
+Será desenvolvido um **sistema de gerenciamento de estoque para as 5 filiais**, com controle de acesso de acordo com o tipo de usuário.
+
+Cada filial terá seu próprio estoque, contendo os produtos e suas respectivas quantidades.
+
+O sistema permitirá que funcionários e gerentes **aumentem ou diminuam manualmente a quantidade de produtos em estoque**. Dessa forma, quando um produto for vendido, recebido ou tiver sua quantidade alterada por algum motivo, o funcionário poderá atualizar o estoque no sistema.
+
+Toda alteração relevante deverá ser registrada no histórico, permitindo saber **qual produto foi alterado, qual era a quantidade anterior, qual passou a ser a nova quantidade, quem realizou a alteração e quando ela ocorreu**.
+
+O sistema também permitirá realizar solicitações de transferência de produtos entre as filiais. Essas movimentações deverão registrar a **origem, destino, produto e quantidade**.
+
+O estoque de cada produto possuirá um status:
+
+-   **Suficiente:** estoque dentro da quantidade esperada.
+    
+-   **Baixo:** estoque abaixo da quantidade mínima definida.
+    
+-   **Zerado:** não existem unidades disponíveis.
+    
+
+Quando um produto estiver baixo ou zerado, o gerente poderá realizar um **pedido de compra** para reposição.
+
+O gerente também terá acesso a **gráficos de desempenho das filiais**, permitindo visualizar e comparar as movimentações e o estado dos estoques.
+
+----------
+
+# 4. Requisitos — O que a solução precisa fazer?
+
+## 4.1 Controle de usuários
+
+-   O sistema deve possuir login de usuários.
+    
+-   O sistema deve possuir dois tipos de usuário: **gerente e funcionário**.
+    
+-   O gerente deve ter acesso às informações das 5 filiais.
+    
+-   O funcionário deve ter acesso somente à filial em que trabalha.
+    
+-   O sistema deve impedir que funcionários acessem o estoque de outras filiais.
+    
+
+## 4.2 Controle do estoque
+
+-   O sistema deve permitir cadastrar produtos.
+    
+-   O sistema deve armazenar a quantidade de cada produto em cada filial.
+    
+-   O funcionário deve poder **aumentar a quantidade de um produto em estoque**.
+    
+-   O funcionário deve poder **diminuir a quantidade de um produto em estoque**.
+    
+-   O gerente também deve poder alterar as quantidades do estoque.
+    
+-   O sistema deve atualizar a quantidade disponível após cada alteração.
+    
+-   O sistema deve informar o status do estoque como **suficiente, baixo ou zerado**.
+    
+-   O sistema deve registrar quem realizou cada alteração no estoque.
+    
+
+### Exemplo
+
+Se uma filial possui **20 unidades** de um produto e 1 unidade é vendida:
+
+> Estoque anterior: 20  
+> Quantidade retirada: 1  
+> Novo estoque: 19
+
+O sistema deve registrar essa alteração no histórico.
+
+----------
+
+## 4.3 Histórico de transações
+
+-   O sistema deve registrar as alterações realizadas no estoque.
+    
+-   O sistema deve registrar o produto envolvido na alteração.
+    
+-   O sistema deve registrar a quantidade anterior.
+    
+-   O sistema deve registrar a nova quantidade.
+    
+-   O sistema deve registrar o usuário responsável pela alteração.
+    
+-   O sistema deve registrar a data e horário da alteração.
+    
+-   O sistema deve manter o histórico das movimentações entre filiais.
+    
+
+----------
+
+## 4.4 Transferência entre filiais
+
+-   Funcionários e gerentes devem poder solicitar transferências de estoque.
+    
+-   O sistema deve registrar a filial de origem.
+    
+-   O sistema deve registrar a filial de destino.
+    
+-   O sistema deve registrar o produto transferido.
+    
+-   O sistema deve registrar a quantidade transferida.
+    
+-   A transferência deve alterar o estoque da filial de origem.
+    
+-   A transferência deve alterar o estoque da filial de destino.
+    
+-   A transferência deve ficar registrada no histórico.
+    
+
+### Exemplo
+
+A filial 1 possui 50 unidades e envia 10 para a filial 2:
+
+> Filial 1: 50 → 40 unidades  
+> Filial 2: +10 unidades
+
+Essa movimentação deverá ficar registrada no histórico.
+
+----------
+
+## 4.5 Pedidos de compra
+
+-   Somente o gerente poderá realizar pedidos de compra.
+    
+-   O gerente deve poder selecionar o produto que deseja comprar.
+    
+-   O gerente deve informar a quantidade desejada.
+    
+-   O sistema deve registrar o pedido de compra.
+    
+-   O sistema deve permitir identificar produtos com estoque baixo ou zerado para facilitar a reposição.
+    
+
+----------
+
+## 4.6 Gráficos
+
+-   O sistema deve apresentar gráficos relacionados ao estoque e às movimentações das filiais.
+    
+-   O gerente deve poder visualizar os gráficos das 5 filiais.
+    
+-   O funcionário deve visualizar somente os dados relacionados à sua filial.
+    
+
+----------
+
+# 5. Não requisitos — O que a solução não precisa fazer?
+
+Para manter o projeto focado no **controle de estoque**, as seguintes funcionalidades não serão necessárias:
+
+-   Não é necessário realizar vendas pelo sistema.
+    
+-   Não é necessário possuir sistema de caixa.
+    
+-   Não é necessário controlar clientes.
+    
+-   Não é necessário realizar pagamentos.
+    
+-   Não é necessário emitir notas fiscais.
+    
+-   Não é necessário realizar compras automaticamente.
+-   Não é necessário possuir integração com fornecedores.
+
+-   Não é necessário controlar preços de venda.
+    
+-   Não é necessário possuir controle financeiro das filiais.
+    
+-   Não é necessário possuir aplicativo para celular.
+    
+-   Não é necessário possuir inteligência artificial.
+    
+-   Não é necessário prever automaticamente quando um produto irá acabar.
+    
+-   Não é necessário realizar pedidos de compra automaticamente.
+    
+-   Não é necessário possuir sistema de recomendação de produtos.
+    
+-   Não é necessário possuir funcionalidades de marketing.
+    
+-   Não é necessário possuir funcionalidades de vendas.
+    
+-   Não é necessário permitir que funcionários realizem compras de produtos.
+    
+-   Não é necessário permitir que funcionários visualizem outras filiais.
+    
+-   Não é necessário possuir funcionalidades que não estejam diretamente relacionadas ao **controle, alteração, transferência, histórico ou reposição do estoque**.

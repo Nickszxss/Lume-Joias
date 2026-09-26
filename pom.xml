@@ -22,7 +22,11 @@
     <description>Sistema de Gerenciamento de Estoque</description>
 
     <properties>
+<<<<<<< HEAD
         <java.version>25</java.version>
+=======
+        <java.version>17</java.version>
+>>>>>>> a6348de (atualizacoes do jules para conexao do supabase)
     </properties>
 
     <dependencies>

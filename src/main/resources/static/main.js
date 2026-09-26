@@ -85,6 +85,13 @@ function toggleTheme() {
 function updateThemeUI(theme) {
   const icon = document.getElementById('theme-icon');
   const text = document.getElementById('theme-text');
+  const loginLogo = document.getElementById('login-logo');
+  const appLogo = document.getElementById('app-logo');
+  const logoSrc = theme === 'dark' ? 'img/logopescuro.png' : 'img/Lume.png';
+
+  if (loginLogo) loginLogo.src = logoSrc;
+  if (appLogo) appLogo.src = logoSrc;
+
   if (theme === 'dark') { icon.innerHTML = ICON_SUN; text.textContent = 'Modo Claro'; }
   else { icon.innerHTML = ICON_MOON; text.textContent = 'Modo Escuro'; }
 }

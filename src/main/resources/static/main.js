@@ -142,17 +142,28 @@ async function fazerLogin(){
 // Atalho para testar o layout sem o backend rodando ainda.
 function simularLogin(tipo){
   aplicarLogin(tipo === 'gerente'
+<<<<<<< HEAD
     ? {nome:'Carla Gerente', tipo:'gerente', filial_id:null}
     : {nome:'João Silva', tipo:'funcionario', filial_id:1});
+=======
+    ? {nome:'', tipo:'gerente', filial_id:null}
+    : {nome:'', tipo:'funcionario', filial_id:1});
+>>>>>>> 7567fa8 (verificacao da conexao com o supabase e alguns ajustes)
 }
 
 async function aplicarLogin(dadosUsuario){
   usuario = dadosUsuario;
   $('login-screen').style.display = 'none';
   $('app').classList.add('active');
+<<<<<<< HEAD
   $('user-nome').textContent = usuario.nome;
   $('user-tipo').textContent = (usuario.tipo==='gerente' ? 'Gerente — todas as filiais' : `Funcionário — ${nomeFilial(usuario.filial_id)}`);
   $('user-initial').textContent = usuario.nome[0];
+=======
+  $('user-nome').textContent = usuario.nome || '';
+  $('user-tipo').textContent = usuario.tipo === 'gerente' ? 'Gerente' : 'Funcionário';
+  $('user-initial').textContent = usuario.tipo === 'gerente' ? 'G' : 'F';
+>>>>>>> 7567fa8 (verificacao da conexao com o supabase e alguns ajustes)
 
   const btnPedido = $('btn-novo-pedido');
   btnPedido.disabled = usuario.tipo !== 'gerente';
@@ -624,4 +635,8 @@ async function renderHistorico(){
 function fecharModal(){
   $('modal-overlay').classList.remove('active');
   document.querySelectorAll('.modal').forEach(m => m.style.display = 'none');
+<<<<<<< HEAD
 }
+=======
+}
+>>>>>>> 7567fa8 (verificacao da conexao com o supabase e alguns ajustes)

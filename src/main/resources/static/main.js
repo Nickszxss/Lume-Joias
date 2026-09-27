@@ -132,14 +132,16 @@ function mostrarLoading(el){
 
 // ---------- LOGIN ----------
 async function fazerLogin(){
+  const nome = $('login-nome') ? $('login-nome').value.trim() : '';
   const email = $('login-email').value.trim();
   const senha = $('login-senha').value;
   if(!email || !senha){ toast('Preencha e-mail e senha.', true); return; }
 
   try {
-    const resposta = await api.login({ email, senha });
+    const resposta = await api.login({ email, senha, nome });
     // Espera-se que o backend retorne algo como:
     // { nome, tipo: 'gerente' | 'funcionario', filialId }
+    if (nome) resposta.nome = nome;
     aplicarLogin(resposta);
   } catch (err) {
     toast(err.message || 'Não foi possível entrar. Verifique suas credenciais.', true);
@@ -148,14 +150,11 @@ async function fazerLogin(){
 
 // Atalho para testar o layout sem o backend rodando ainda.
 function simularLogin(tipo){
+  const nomeInput = $('login-nome') ? $('login-nome').value.trim() : '';
+  const nome = nomeInput || (tipo === 'gerente' ? 'Gerente' : 'Funcionário');
   aplicarLogin(tipo === 'gerente'
-<<<<<<< HEAD
-    ? {nome:'Carla Gerente', tipo:'gerente', filial_id:null}
-    : {nome:'João Silva', tipo:'funcionario', filial_id:1});
-=======
-    ? {nome:'', tipo:'gerente', filial_id:null}
-    : {nome:'', tipo:'funcionario', filial_id:1});
->>>>>>> 913f1b5 (Conexão ao supabase)
+    ? {nome, tipo:'gerente', filial_id:null}
+    : {nome, tipo:'funcionario', filial_id:1});
 }
 
 async function aplicarLogin(dadosUsuario){

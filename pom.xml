@@ -10,7 +10,7 @@
     <parent>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-starter-parent</artifactId>
-        <version>4.1.1</version>
+        <version>3.2.3</version>
         <relativePath/>
     </parent>
 
@@ -22,11 +22,7 @@
     <description>Sistema de Gerenciamento de Estoque</description>
 
     <properties>
-<<<<<<< HEAD
-        <java.version>25</java.version>
-=======
         <java.version>17</java.version>
->>>>>>> a6348de (atualizacoes do jules para conexao do supabase)
     </properties>
 
     <dependencies>
@@ -34,7 +30,7 @@
         <!-- Spring Web / API REST -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-webmvc</artifactId>
+            <artifactId>spring-boot-starter-web</artifactId>
         </dependency>
 
         <!-- Spring Data JPA / Hibernate -->

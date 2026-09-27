@@ -1,4 +1,8 @@
 @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@500;600;700&family=Montserrat:wght@300;400;500;600&display=swap');
+<<<<<<< HEAD
+=======
+@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&display=swap');
+>>>>>>> 913f1b5 (Conexão ao supabase)
 
 :root {
   --bg-main:#f7f7f8;
@@ -95,29 +99,57 @@ body {
 }
 
 .brand-badge {
+<<<<<<< HEAD
   width:100px;
   height:100px;
   margin:0 auto 12px;
+=======
+  width:80px;
+  height:80px;
+  margin:0 auto 4px;
+>>>>>>> 913f1b5 (Conexão ao supabase)
   display:flex;
   align-items:center;
   justify-content:center;
 }
 
 .brand-badge img {
+<<<<<<< HEAD
   width:100%;
   height:100%;
+=======
+  width:132px;
+  height:132px;
+  max-width:none;
+>>>>>>> 913f1b5 (Conexão ao supabase)
   object-fit:contain;
 }
 
 .login-card h1 {
+<<<<<<< HEAD
+=======
+  font-family:'Cormorant Garamond',Georgia,serif;
+>>>>>>> 913f1b5 (Conexão ao supabase)
   font-size:1.375rem;
   font-weight:600;
   color:var(--text-primary);
 }
 
+<<<<<<< HEAD
 .login-card p.sub {
   margin-top:4px;
   font-size:.8125rem;
+=======
+.login-header h1 {
+  font-size:2.25rem;
+  letter-spacing:.04em;
+  color:var(--rose-primary);
+}
+
+.login-card p.sub {
+  margin-top:4px;
+  font-size:.875rem;
+>>>>>>> 913f1b5 (Conexão ao supabase)
   color:var(--text-secondary);
 }
 
@@ -130,7 +162,11 @@ body {
 .field label {
   display:block;
   margin-bottom:6px;
+<<<<<<< HEAD
   font-size:.75rem;
+=======
+  font-size:.8125rem;
+>>>>>>> 913f1b5 (Conexão ao supabase)
   font-weight:600;
   color:var(--text-secondary);
   text-transform:uppercase;
@@ -147,7 +183,11 @@ body {
   border-radius:6px;
   background-color:var(--input-bg);
   color:var(--text-primary);
+<<<<<<< HEAD
   font-size:.875rem;
+=======
+  font-size:.9375rem;
+>>>>>>> 913f1b5 (Conexão ao supabase)
   outline:none;
 }
 
@@ -162,8 +202,13 @@ body {
 /* DEMO LOGIN */
 
 .demo-hint {
+<<<<<<< HEAD
   margin-top:24px;
   font-size:.8125rem;
+=======
+  margin-top:18px;
+  font-size:.75rem;
+>>>>>>> 913f1b5 (Conexão ao supabase)
   color:var(--text-secondary);
   text-align:center;
   line-height:1.6;

@@ -149,8 +149,13 @@ async function fazerLogin(){
 // Atalho para testar o layout sem o backend rodando ainda.
 function simularLogin(tipo){
   aplicarLogin(tipo === 'gerente'
+<<<<<<< HEAD
     ? {nome:'Carla Gerente', tipo:'gerente', filial_id:null}
     : {nome:'João Silva', tipo:'funcionario', filial_id:1});
+=======
+    ? {nome:'', tipo:'gerente', filial_id:null}
+    : {nome:'', tipo:'funcionario', filial_id:1});
+>>>>>>> 913f1b5 (Conexão ao supabase)
 }
 
 async function aplicarLogin(dadosUsuario){

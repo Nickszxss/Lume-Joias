@@ -82,37 +82,14 @@ body {
 .login-card {
   width:100%;
   max-width:420px;
-<<<<<<< HEAD
-  padding:40px;
-  background-color:var(--bg-card);
-  border:1px solid var(--border);
-=======
   padding:32px;
   background-color:var(--bg-card);
->>>>>>> d53523a (refinamento do codigo)
   border-radius:8px;
   box-shadow:var(--shadow-lg);
 }
 
 .login-header {
   text-align:center;
-<<<<<<< HEAD
-  margin-bottom:20px;
-}
-
-.brand-badge {
-  width:130px;
-  height:130px;
-  margin:0 auto 6px;
-  display:flex;
-  align-items:center;
-  justify-content:center;
-}
-
-.brand-badge img {
-  width:100%;
-  height:100%;
-=======
   margin-bottom:16px;
 }
 
@@ -121,7 +98,6 @@ body {
   width:120px;
   height:120px;
   margin:0 auto;
->>>>>>> d53523a (refinamento do codigo)
   object-fit:contain;
 }
 
@@ -135,11 +111,7 @@ body {
 
 .login-card p.sub {
   margin-top:4px;
-<<<<<<< HEAD
-  font-size:.875rem;
-=======
   font-size:.7958rem;
->>>>>>> d53523a (refinamento do codigo)
   color:var(--text-secondary);
 }
 
@@ -250,12 +222,8 @@ main {
 }
 
 .brand-icon {
-<<<<<<< HEAD
-  width:110px;
-=======
   width:75px;
   margin-bottom:25px;
->>>>>>> d53523a (refinamento do codigo)
   flex-shrink:0;
   display:flex;
   align-items:center;
@@ -396,10 +364,7 @@ main {
 
 .user-info b {
   display:block;
-<<<<<<< HEAD
-=======
   margin-bottom:4px;
->>>>>>> d53523a (refinamento do codigo)
   font-size:.8125rem;
   font-weight:600;
   color:var(--text-primary);

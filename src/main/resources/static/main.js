@@ -135,26 +135,24 @@ async function fazerLogin(){
   const nome = $('login-nome') ? $('login-nome').value.trim() : '';
   const email = $('login-email').value.trim();
   const senha = $('login-senha').value;
-  if(!email || !senha){ toast('Preencha e-mail e senha.', true); return; }
+  const cargo = $('login-cargo') ? $('login-cargo').value : '';
+
+  if(!email || !senha || !cargo){ toast('Preencha nome, e-mail, senha e cargo.', true); return; }
 
   try {
-    const resposta = await api.login({ email, senha, nome });
-    // Espera-se que o backend retorne algo como:
-    // { nome, tipo: 'gerente' | 'funcionario', filialId }
-    if (nome) resposta.nome = nome;
+    const resposta = await api.login({ nome, email, senha, cargo });
     aplicarLogin(resposta);
   } catch (err) {
-    toast(err.message || 'Não foi possível entrar. Verifique suas credenciais.', true);
+    toast('ACESSO NEGADO: ' + (err.message || 'Informações incorretas.'), true);
   }
 }
 
-// Atalho para testar o layout sem o backend rodando ainda.
 function simularLogin(tipo){
-  const nomeInput = $('login-nome') ? $('login-nome').value.trim() : '';
-  const nome = nomeInput || (tipo === 'gerente' ? 'Gerente' : 'Funcionário');
-  aplicarLogin(tipo === 'gerente'
-    ? {nome, tipo:'gerente', filial_id:null}
-    : {nome, tipo:'funcionario', filial_id:1});
+  if ($('login-nome')) $('login-nome').value = 'Nicoly';
+  if ($('login-email')) $('login-email').value = tipo === 'gerente' ? 'nicoly.grt@empresa.com' : 'nicoly.func@empresa.com';
+  if ($('login-senha')) $('login-senha').value = '160611';
+  if ($('login-cargo')) $('login-cargo').value = tipo;
+  fazerLogin();
 }
 
 async function aplicarLogin(dadosUsuario){

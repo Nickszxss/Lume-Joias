@@ -14,13 +14,7 @@
 <div id="login-screen">
   <div class="login-card">
     <div class="login-header">
-<<<<<<< HEAD
-      <div class="brand-badge">
-        <img id="login-logo" src="img/Lume.png" alt="Logo Lume Joias">
-      </div>
-=======
       <img id="login-logo" src="img/Lume.png" alt="Logo Lume Joias">
->>>>>>> d53523a (refinamento do codigo)
       <h1>Lume Joias</h1>
       <p class="sub">Sistema de Gerenciamento de Estoque — 5 Filiais</p>
     </div>
@@ -38,6 +32,15 @@
     <div class="field">
       <label>Senha</label>
       <input type="password" id="login-senha" placeholder="••••••••">
+    </div>
+
+    <div class="field">
+      <label>Cargo</label>
+      <select id="login-cargo">
+        <option value="">Selecione o cargo</option>
+        <option value="funcionario">Funcionário</option>
+        <option value="gerente">Gerente</option>
+      </select>
     </div>
 
     <button class="btn btn-primary" onclick="fazerLogin()">Entrar</button>

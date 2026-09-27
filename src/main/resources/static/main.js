@@ -85,16 +85,13 @@ function toggleTheme() {
 function updateThemeUI(theme) {
   const icon = document.getElementById('theme-icon');
   const text = document.getElementById('theme-text');
-<<<<<<< HEAD
-=======
   const loginLogo = document.getElementById('login-logo');
   const appLogo = document.getElementById('app-logo');
-  const logoSrc = theme === 'dark' ? 'img/logopescuro.png' : 'img/Lume.png';
+  const logoSrc = theme === 'dark' ? 'img/LumeEscuro.png' : 'img/Lume.png';
 
   if (loginLogo) loginLogo.src = logoSrc;
   if (appLogo) appLogo.src = logoSrc;
 
->>>>>>> a6348de (atualizacoes do jules para conexao do supabase)
   if (theme === 'dark') { icon.innerHTML = ICON_SUN; text.textContent = 'Modo Claro'; }
   else { icon.innerHTML = ICON_MOON; text.textContent = 'Modo Escuro'; }
 }
@@ -152,39 +149,17 @@ async function fazerLogin(){
 // Atalho para testar o layout sem o backend rodando ainda.
 function simularLogin(tipo){
   aplicarLogin(tipo === 'gerente'
-<<<<<<< HEAD
-<<<<<<< HEAD
     ? {nome:'Carla Gerente', tipo:'gerente', filial_id:null}
     : {nome:'João Silva', tipo:'funcionario', filial_id:1});
-=======
-    ? {nome:'', tipo:'gerente', filial_id:null}
-    : {nome:'', tipo:'funcionario', filial_id:1});
->>>>>>> 7567fa8 (verificacao da conexao com o supabase e alguns ajustes)
-=======
-    ? {nome:'', tipo:'gerente', filial_id:null}
-    : {nome:'', tipo:'funcionario', filial_id:1});
->>>>>>> a6348de (atualizacoes do jules para conexao do supabase)
 }
 
 async function aplicarLogin(dadosUsuario){
   usuario = dadosUsuario;
   $('login-screen').style.display = 'none';
   $('app').classList.add('active');
-<<<<<<< HEAD
-<<<<<<< HEAD
-  $('user-nome').textContent = usuario.nome;
+  $('user-nome').textContent = usuario.nome || '';
   $('user-tipo').textContent = (usuario.tipo==='gerente' ? 'Gerente — todas as filiais' : `Funcionário — ${nomeFilial(usuario.filial_id)}`);
-  $('user-initial').textContent = usuario.nome[0];
-=======
-  $('user-nome').textContent = usuario.nome || '';
-  $('user-tipo').textContent = usuario.tipo === 'gerente' ? 'Gerente' : 'Funcionário';
-  $('user-initial').textContent = usuario.tipo === 'gerente' ? 'G' : 'F';
->>>>>>> 7567fa8 (verificacao da conexao com o supabase e alguns ajustes)
-=======
-  $('user-nome').textContent = usuario.nome || '';
-  $('user-tipo').textContent = usuario.tipo === 'gerente' ? 'Gerente' : 'Funcionário';
   $('user-initial').textContent = usuario.nome ? usuario.nome[0].toUpperCase() : (usuario.tipo === 'gerente' ? 'G' : 'F');
->>>>>>> a6348de (atualizacoes do jules para conexao do supabase)
 
   const btnPedido = $('btn-novo-pedido');
   btnPedido.disabled = usuario.tipo !== 'gerente';
@@ -656,12 +631,4 @@ async function renderHistorico(){
 function fecharModal(){
   $('modal-overlay').classList.remove('active');
   document.querySelectorAll('.modal').forEach(m => m.style.display = 'none');
-<<<<<<< HEAD
-<<<<<<< HEAD
 }
-=======
-}
->>>>>>> 7567fa8 (verificacao da conexao com o supabase e alguns ajustes)
-=======
-}
->>>>>>> a6348de (atualizacoes do jules para conexao do supabase)

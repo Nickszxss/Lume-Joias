@@ -46,6 +46,13 @@
             <scope>runtime</scope>
         </dependency>
 
+        <!-- H2 Database (Banco em Memória Local para Execução Sem Falhas) -->
+        <dependency>
+            <groupId>com.h2database</groupId>
+            <artifactId>h2</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+
         <!-- Validação -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

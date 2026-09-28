@@ -3,8 +3,9 @@
 ## Sprint 1 — Estrutura Base e Autenticação
 - [x] Configuração inicial do Spring Boot
 - [x] Criação do front-end SPA
-- [x] Simulação de login por perfil (Gerente e Funcionário)
-- [x] Conexão com Supabase
+- [x] Implementação e validação de login por perfil (Gerente e Funcionário) com Supabase/Banco de Dados
+- [x] Cadastro dos usuários iniciais (nicoly.func@empresa.com e nicoly.grt@empresa.com)
+- [x] Conexão com Supabase e banco de dados
 
 ## Sprint 2 — Gestão de Produtos e Estoque
 - [ ] Cadastro e listagem de produtos

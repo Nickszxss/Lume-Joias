@@ -1,0 +1,540 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SGE — Sistema de Gerenciamento de Estoque</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <base target="_blank">
+</head>
+<body>
+
+<!-- LOGIN -->
+<div id="login-screen">
+  <div class="login-card">
+    <div class="login-header">
+      <div class="brand-badge">
+        <img id="login-logo" src="img/Lume.png" alt="Logo Lume Joias">
+      </div>
+      <h1>Lume Joias</h1>
+      <p class="sub">Sistema de Gerenciamento de Estoque — 5 Filiais</p>
+    </div>
+
+    <div class="field">
+      <label>Nome do usuário</label>
+      <input type="text" id="login-nome" placeholder="Seu nome">
+    </div>
+
+    <div class="field">
+      <label>E-mail</label>
+      <input type="email" id="login-email" placeholder="seu@email.com">
+    </div>
+
+    <div class="field">
+      <label>Senha</label>
+      <input type="password" id="login-senha" placeholder="••••••••">
+    </div>
+
+    <button class="btn btn-primary" onclick="fazerLogin()">Entrar</button>
+
+    <p class="demo-hint">
+      Protótipo — clique para simular:<br>
+      <b onclick="simularLogin('gerente')">Login como Gerente</b> ·
+      <b onclick="simularLogin('funcionario')">Login como Funcionário</b>
+    </p>
+  </div>
+</div>
+
+<!-- APP -->
+<div id="app">
+  <aside>
+
+    <!-- LOGO -->
+    <div class="logo">
+      <div class="brand-icon">
+        <img id="app-logo" src="img/Lume.png" alt="Logo Lume Joias">
+      </div>
+    </div>
+
+    <!-- MENU -->
+    <nav id="menu">
+
+      <a data-page="dashboard" class="active">
+        <span class="icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+            <path d="M3 3v18h18"/>
+            <path d="M7 15l4-4 3 3 5-6"/>
+          </svg>
+        </span>
+        Dashboard
+      </a>
+
+      <a data-page="produtos">
+        <span class="icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+            <path d="M20.5 12.5 12 21l-9-9 8.5-8.5H20a1 1 0 0 1 1 1v8.5Z"/>
+            <circle cx="15.5" cy="7.5" r="1"/>
+          </svg>
+        </span>
+        Produtos
+      </a>
+
+      <a data-page="estoque">
+        <span class="icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+            <path d="M21 8 12 3 3 8v8l9 5 9-5V8Z"/>
+            <path d="M3 8l9 5 9-5"/>
+            <path d="M12 13v8"/>
+          </svg>
+        </span>
+        Estoque
+      </a>
+
+      <a data-page="transferencias">
+        <span class="icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+            <path d="M17 2l4 4-4 4"/>
+            <path d="M3 11V9a4 4 0 0 1 4-4h14"/>
+            <path d="M7 22l-4-4 4-4"/>
+            <path d="M21 13v2a4 4 0 0 1-4 4H3"/>
+          </svg>
+        </span>
+        Transferências
+      </a>
+
+      <a data-page="pedidos">
+        <span class="icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+            <rect x="5" y="4" width="14" height="17" rx="1.5"/>
+            <path d="M9 3h6v3H9z"/>
+            <path d="M9 11h6"/>
+            <path d="M9 15h6"/>
+          </svg>
+        </span>
+        Pedidos de Compra
+      </a>
+
+      <a data-page="alertas">
+        <span class="icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+            <path d="M12 3 2 20h20L12 3Z"/>
+            <path d="M12 10v4"/>
+            <circle cx="12" cy="17" r="0.6" fill="currentColor"/>
+          </svg>
+        </span>
+        Alertas
+      </a>
+
+      <a data-page="historico">
+        <span class="icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+            <circle cx="12" cy="12" r="9"/>
+            <path d="M12 7v5l3 3"/>
+          </svg>
+        </span>
+        Histórico
+      </a>
+
+    </nav>
+
+    <!-- TEMA -->
+    <div class="theme-toggle-container">
+      <button id="theme-toggle" class="btn-theme-toggle" onclick="toggleTheme()" title="Alternar Tema">
+        <span id="theme-icon"></span>
+        <span id="theme-text">Modo Escuro</span>
+      </button>
+    </div>
+
+    <!-- USUÁRIO -->
+    <div class="user-box">
+      <div class="avatar" id="user-initial">G</div>
+
+      <div class="user-info">
+        <b id="user-nome">—</b>
+        <span id="user-tipo">—</span>
+      </div>
+
+      <button id="logout" onclick="sair()" title="Sair">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+          <path d="M18.4 5.6a9 9 0 1 1-12.8 0"/>
+          <path d="M12 3v8"/>
+        </svg>
+      </button>
+    </div>
+
+  </aside>
+
+  <main>
+
+    <!-- DASHBOARD -->
+    <section class="page active" id="page-dashboard">
+      <div class="page-header">
+        <div>
+          <h2>Dashboard</h2>
+          <p class="desc" id="dash-desc">Visão geral do estoque</p>
+        </div>
+        <div class="tab-filial" id="dash-filiais"></div>
+      </div>
+
+      <div class="grid-kpi" id="dash-kpis"></div>
+
+      <div class="grid-2">
+        <div class="card">
+          <h3 class="section">Estoque por Filial</h3>
+          <div class="chart-box">
+            <canvas id="chart-estoque-filial"></canvas>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3 class="section">Movimentações (7 dias)</h3>
+          <div class="chart-box">
+            <canvas id="chart-movimentacoes"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:20px;">
+        <h3 class="section">Itens com Estoque Baixo ou Zerado</h3>
+        <div id="dash-alertas"></div>
+      </div>
+    </section>
+
+    <!-- PRODUTOS -->
+    <section class="page" id="page-produtos">
+      <div class="page-header">
+        <div>
+          <h2>Produtos</h2>
+          <p class="desc">Cadastro de produtos (o backend Java valida e persiste os dados)</p>
+        </div>
+
+        <button class="btn-sm btn-primary" onclick="abrirModalProduto()">
+          + Novo Produto
+        </button>
+      </div>
+
+      <div class="toolbar">
+        <input type="text" id="busca-produto" placeholder="Buscar por nome ou código..." oninput="renderProdutos()">
+
+        <select id="filtro-status" onchange="renderProdutos()">
+          <option value="">Todos os status</option>
+          <option value="suficiente">Suficiente</option>
+          <option value="baixo">Baixo</option>
+          <option value="zerado">Zerado</option>
+        </select>
+      </div>
+
+      <div class="card">
+        <table>
+          <thead>
+            <tr>
+              <th>SKU</th>
+              <th>Produto</th>
+              <th>Categoria</th>
+              <th>Qtd. Mínima</th>
+              <th>Filial</th>
+              <th>Qtd. Atual</th>
+              <th>Status</th>
+              <th>Ações</th>
+            </tr>
+          </thead>
+          <tbody id="tbody-produtos"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ESTOQUE -->
+    <section class="page" id="page-estoque">
+      <div class="page-header">
+        <div>
+          <h2>Estoque</h2>
+          <p class="desc">Ajustes de entrada e saída — movimentações ficam registradas no histórico</p>
+        </div>
+
+        <div class="tab-filial" id="estoque-filiais"></div>
+      </div>
+
+      <div class="card">
+        <table>
+          <thead>
+            <tr>
+              <th>SKU</th>
+              <th>Produto</th>
+              <th>Quantidade</th>
+              <th>Mínimo</th>
+              <th>Status</th>
+              <th>Ajustar</th>
+            </tr>
+          </thead>
+          <tbody id="tbody-estoque"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- TRANSFERÊNCIAS -->
+    <section class="page" id="page-transferencias">
+      <div class="page-header">
+        <div>
+          <h2>Transferências</h2>
+          <p class="desc">Solicite e conclua transferências entre filiais</p>
+        </div>
+
+        <button class="btn-sm btn-primary" onclick="abrirModalTransferencia()">
+          + Nova Transferência
+        </button>
+      </div>
+
+      <div class="card">
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Produto</th>
+              <th>Origem</th>
+              <th>Destino</th>
+              <th>Qtd.</th>
+              <th>Solicitante</th>
+              <th>Data</th>
+              <th>Status</th>
+              <th>Ação</th>
+            </tr>
+          </thead>
+          <tbody id="tbody-transferencias"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- PEDIDOS -->
+    <section class="page" id="page-pedidos">
+      <div class="page-header">
+        <div>
+          <h2>Pedidos de Compra</h2>
+          <p class="desc" id="pedidos-desc">Criados manualmente pelo gerente para reposição</p>
+        </div>
+
+        <button class="btn-sm btn-primary" id="btn-novo-pedido" onclick="abrirModalPedido()">
+          + Novo Pedido
+        </button>
+      </div>
+
+      <div class="card">
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Produto</th>
+              <th>Quantidade</th>
+              <th>Filial</th>
+              <th>Solicitado por</th>
+              <th>Data</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody id="tbody-pedidos"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ALERTAS -->
+    <section class="page" id="page-alertas">
+      <div class="page-header">
+        <div>
+          <h2>Alertas de Estoque</h2>
+          <p class="desc">Produtos com quantidade abaixo do mínimo ou zerados</p>
+        </div>
+      </div>
+
+      <div class="grid-kpi" id="alertas-kpis"></div>
+
+      <div class="card">
+        <table>
+          <thead>
+            <tr>
+              <th>SKU</th>
+              <th>Produto</th>
+              <th>Filial</th>
+              <th>Qtd. Atual</th>
+              <th>Qtd. Mínima</th>
+              <th>Status</th>
+              <th>Ação</th>
+            </tr>
+          </thead>
+          <tbody id="tbody-alertas"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- HISTÓRICO -->
+    <section class="page" id="page-historico">
+      <div class="page-header">
+        <div>
+          <h2>Histórico de Movimentações</h2>
+          <p class="desc">Quem alterou, quando, e quantidades anterior → nova</p>
+        </div>
+      </div>
+
+      <div class="toolbar">
+        <select id="hist-tipo" onchange="renderHistorico()">
+          <option value="">Todos os tipos</option>
+          <option value="entrada">Entrada</option>
+          <option value="saida">Saída</option>
+          <option value="transferencia">Transferência</option>
+        </select>
+
+        <select id="hist-filial" onchange="renderHistorico()">
+          <option value="">Todas as filiais</option>
+        </select>
+      </div>
+
+      <div class="card">
+        <table>
+          <thead>
+            <tr>
+              <th>Data/Hora</th>
+              <th>Produto</th>
+              <th>Filial</th>
+              <th>Tipo</th>
+              <th>Anterior</th>
+              <th>Nova</th>
+              <th>Usuário</th>
+              <th>Motivo</th>
+            </tr>
+          </thead>
+          <tbody id="tbody-historico"></tbody>
+        </table>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<!-- MODAIS -->
+<div class="modal-overlay" id="modal-overlay" onclick="if(event.target===this)fecharModal()">
+
+  <!-- PRODUTO -->
+  <div class="modal" id="modal-produto" style="display:none;">
+    <h3>Novo Produto</h3>
+
+    <div class="field">
+      <label>Nome</label>
+      <input id="p-nome" placeholder="Nome do produto">
+    </div>
+
+    <div class="field">
+      <label>Categoria</label>
+      <input id="p-cat" placeholder="Ex: Bebidas">
+    </div>
+
+    <div class="field">
+      <label>SKU</label>
+      <input id="p-sku" placeholder="Ex: PRD-001">
+    </div>
+
+    <div class="field">
+      <label>Quantidade mínima</label>
+      <input id="p-min" type="number" min="0" value="10">
+    </div>
+
+    <div class="field">
+      <label>Quantidade inicial</label>
+      <input id="p-qtd" type="number" min="0" value="0">
+    </div>
+
+    <div class="actions">
+      <button class="btn btn-secondary" onclick="fecharModal()">Cancelar</button>
+      <button class="btn btn-primary" onclick="salvarProduto()">Salvar</button>
+    </div>
+  </div>
+
+  <!-- AJUSTE -->
+  <div class="modal" id="modal-ajuste" style="display:none;">
+    <h3 id="ajuste-titulo">Ajustar Estoque</h3>
+
+    <div class="field">
+      <label>Tipo de movimentação</label>
+      <select id="a-tipo">
+        <option value="entrada">Entrada (aumenta)</option>
+        <option value="saida">Saída (diminui)</option>
+      </select>
+    </div>
+
+    <div class="field">
+      <label>Quantidade</label>
+      <input id="a-qtd" type="number" min="1" value="1">
+    </div>
+
+    <div class="field">
+      <label>Motivo</label>
+      <input id="a-motivo" placeholder="Ex: recebimento, perda, avaria...">
+    </div>
+
+    <div class="actions">
+      <button class="btn btn-secondary" onclick="fecharModal()">Cancelar</button>
+      <button class="btn btn-primary" onclick="salvarAjuste()">Confirmar</button>
+    </div>
+  </div>
+
+  <!-- TRANSFERÊNCIA -->
+  <div class="modal" id="modal-transferencia" style="display:none;">
+    <h3>Nova Transferência</h3>
+
+    <div class="field">
+      <label>Produto</label>
+      <select id="t-produto"></select>
+    </div>
+
+    <div class="field">
+      <label>Filial de origem</label>
+      <select id="t-origem"></select>
+    </div>
+
+    <div class="field">
+      <label>Filial de destino</label>
+      <select id="t-destino"></select>
+    </div>
+
+    <div class="field">
+      <label>Quantidade</label>
+      <input id="t-qtd" type="number" min="1" value="1">
+    </div>
+
+    <div class="actions">
+      <button class="btn btn-secondary" onclick="fecharModal()">Cancelar</button>
+      <button class="btn btn-primary" onclick="salvarTransferencia()">Solicitar</button>
+    </div>
+  </div>
+
+  <!-- PEDIDO -->
+  <div class="modal" id="modal-pedido" style="display:none;">
+    <h3>Novo Pedido de Compra</h3>
+
+    <div class="field">
+      <label>Produto</label>
+      <select id="pc-produto"></select>
+    </div>
+
+    <div class="field">
+      <label>Filial</label>
+      <select id="pc-filial"></select>
+    </div>
+
+    <div class="field">
+      <label>Quantidade</label>
+      <input id="pc-qtd" type="number" min="1" value="10">
+    </div>
+
+    <div class="actions">
+      <button class="btn btn-secondary" onclick="fecharModal()">Cancelar</button>
+      <button class="btn btn-primary" onclick="salvarPedido()">Criar Pedido</button>
+    </div>
+  </div>
+
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="main.js"></script>
+
+</body>
+</html>

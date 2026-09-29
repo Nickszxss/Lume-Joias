@@ -31,3 +31,7 @@ build/
 
 ### VS Code ###
 .vscode/
+
+*.log
+spring_app.log
+/home/jules/verification/

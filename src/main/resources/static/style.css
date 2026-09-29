@@ -361,12 +361,17 @@ main {
 }
 
 .user-info {
+  display:flex;
+  align-items:center;
+  gap:8px;
   flex:1;
+  min-width:0;
   overflow:hidden;
 }
 
 .user-info b {
-  display:block;
+  flex:1;
+  min-width:0;
   font-size:.8125rem;
   font-weight:600;
   color:var(--text-primary);
@@ -376,7 +381,7 @@ main {
 }
 
 .user-info span {
-  display:block;
+  flex:0 0 auto;
   font-size:.6875rem;
   color:var(--text-secondary);
   white-space:nowrap;

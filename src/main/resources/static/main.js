@@ -132,19 +132,18 @@ function mostrarLoading(el){
 
 // ---------- LOGIN ----------
 async function fazerLogin(){
-  const nome = $('login-nome') ? $('login-nome').value.trim() : '';
-  const email = $('login-email').value.trim();
-  const senha = $('login-senha').value;
-  if(!email || !senha){ toast('Preencha e-mail e senha.', true); return; }
+  const emailInput = $('login-email');
+  const senhaInput = $('login-senha');
+  const email = emailInput ? emailInput.value.trim() : '';
+  const senha = senhaInput ? senhaInput.value : '';
+
+  if(!email || !senha){ toast('E-mail e senha são obrigatórios.', true); return; }
 
   try {
-    const resposta = await api.login({ email, senha, nome });
-    // Espera-se que o backend retorne algo como:
-    // { nome, tipo: 'gerente' | 'funcionario', filialId }
-    if (nome) resposta.nome = nome;
+    const resposta = await api.login({ email, senha });
     aplicarLogin(resposta);
   } catch (err) {
-    toast(err.message || 'Não foi possível entrar. Verifique suas credenciais.', true);
+    toast(err.message || 'Acesso negado. Credenciais inválidas.', true);
   }
 }
 
@@ -153,12 +152,19 @@ function simularLogin(tipo){
   const nomeInput = $('login-nome') ? $('login-nome').value.trim() : '';
   const nome = nomeInput || (tipo === 'gerente' ? 'Gerente' : 'Funcionário');
   aplicarLogin(tipo === 'gerente'
-    ? {nome, tipo:'gerente', filial_id:null}
-    : {nome, tipo:'funcionario', filial_id:1});
+    ? {nome, tipo:'gerente', cargo:'gerente', filial_id:null}
+    : {nome, tipo:'funcionario', cargo:'funcionario', filial_id:1});
 }
 
 async function aplicarLogin(dadosUsuario){
   usuario = dadosUsuario;
+  if (!usuario.tipo && usuario.cargo) {
+    usuario.tipo = usuario.cargo;
+  }
+  if (usuario.filialId !== undefined && usuario.filial_id === undefined) {
+    usuario.filial_id = usuario.filialId;
+  }
+
   $('login-screen').style.display = 'none';
   $('app').classList.add('active');
   $('user-nome').textContent = usuario.nome || '';

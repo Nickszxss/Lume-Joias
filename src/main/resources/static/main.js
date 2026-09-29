@@ -4,25 +4,208 @@
    Este arquivo apenas consome a API e atualiza a tela.
    ===================================================================== */
 
-// ---------- CONFIGURAÇÃO DA API ----------
-// Ajuste para a URL real do seu backend Java quando estiver disponível.
-const API_BASE_URL = 'http://localhost:8080/api';
+// ---------- CONFIGURAÇÃO DA API E BASE DADOS DEMO/STATIC ----------
+const IS_LOCAL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+const API_BASE_URL = IS_LOCAL ? 'http://localhost:8080/api' : '/api';
 
-// Wrapper único de fetch: centraliza headers, tratamento de erro e JSON.
+// Usuários válidos para fallback no GitHub Pages / frontend estático
+const MOCK_USUARIOS = [
+  { id: 1, nome: 'Anderson', email: 'anderson.func@empresa.com', senha: 'etec2026@DS', cargo: 'funcionario', tipo: 'funcionario', filial_id: 1 },
+  { id: 2, nome: 'Robson', email: 'robson.grt@empresa.com', senha: 'etec2026@DS', cargo: 'gerente', tipo: 'gerente', filial_id: null },
+  { id: 3, nome: 'Isabella', email: 'isabella.func@empresa.com', senha: 'etec2026@DS', cargo: 'funcionario', tipo: 'funcionario', filial_id: 2 },
+  { id: 4, nome: 'Manuella', email: 'manuella.grt@empresa.com', senha: 'etec2026@DS', cargo: 'gerente', tipo: 'gerente', filial_id: null }
+];
+
+// Fallback de dados estáticos para simulação completa no GitHub Pages quando backend Java não estiver exposto publicamente
+let mockFiliais = [
+  { id: 1, nome: 'Filial Centro' },
+  { id: 2, nome: 'Filial Norte' },
+  { id: 3, nome: 'Filial Sul' },
+  { id: 4, nome: 'Filial Leste' },
+  { id: 5, nome: 'Filial Oeste' }
+];
+
+let mockProdutos = [
+  { id: 1, sku: 'JOIA-001', nome: 'Anel de Ouro 18k', categoria: 'Aneis', qtd_minima: 5 },
+  { id: 2, sku: 'JOIA-002', nome: 'Colar de Prata 925', categoria: 'Colares', qtd_minima: 10 },
+  { id: 3, sku: 'JOIA-003', nome: 'Brinco de Diamante', categoria: 'Brincos', qtd_minima: 3 }
+];
+
+let mockEstoques = [
+  { produto_id: 1, filial_id: 1, quantidade: 12, status: 'suficiente' },
+  { produto_id: 1, filial_id: 2, quantidade: 2, status: 'baixo' },
+  { produto_id: 2, filial_id: 1, quantidade: 15, status: 'suficiente' },
+  { produto_id: 2, filial_id: 2, quantidade: 0, status: 'zerado' },
+  { produto_id: 3, filial_id: 1, quantidade: 1, status: 'baixo' }
+];
+
+let mockTransferencias = [
+  { id: 1, produto_id: 1, produtoNome: 'Anel de Ouro 18k', origem_id: 1, origemNome: 'Filial Centro', destino_id: 2, destinoNome: 'Filial Norte', quantidade: 2, solicitante: 'Anderson', data: new Date().toLocaleDateString('pt-BR'), status: 'pendente' }
+];
+
+let mockPedidos = [
+  { id: 1, produto_id: 2, produtoNome: 'Colar de Prata 925', quantidade: 20, filial_id: 2, filialNome: 'Filial Norte', solicitante: 'Robson', data: new Date().toLocaleDateString('pt-BR'), status: 'solicitado' }
+];
+
+let mockMovimentacoes = [
+  { data: new Date().toLocaleString('pt-BR'), produto_id: 1, produtoNome: 'Anel de Ouro 18k', filial_id: 1, filialNome: 'Filial Centro', tipo: 'entrada', anterior: 10, nova: 12, usuario: 'Anderson', motivo: 'Carga inicial de estoque' }
+];
+
+// Wrapper único de fetch: centraliza headers, tratamento de erro, JSON e fallback local para GitHub Pages.
 async function apiRequest(path, options = {}) {
-  const res = await fetch(`${API_BASE_URL}${path}`, {
-    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
-    ...options
-  });
+  try {
+    const res = await fetch(`${API_BASE_URL}${path}`, {
+      headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+      ...options
+    });
 
-  if (!res.ok) {
-    let msg = `Erro ${res.status}`;
-    try { const body = await res.json(); msg = body.message || msg; } catch (_) {}
-    throw new Error(msg);
+    if (!res.ok) {
+      let msg = `Erro ${res.status}`;
+      try { const body = await res.json(); msg = body.message || msg; } catch (_) {}
+      throw new Error(msg);
+    }
+
+    if (res.status === 204) return null;
+    return await res.json();
+  } catch (err) {
+    // Caso esteja rodando sem o backend Java ativo (ex: GitHub Pages puro), executa fallback funcional
+    return resolverMockLocal(path, options);
+  }
+}
+
+function resolverMockLocal(path, options) {
+  const method = (options.method || 'GET').toUpperCase();
+  const body = options.body ? JSON.parse(options.body) : {};
+
+  if (path === '/auth/login' && method === 'POST') {
+    const usr = MOCK_USUARIOS.find(u => u.email.toLowerCase() === (body.email || '').toLowerCase() && u.senha === body.senha);
+    if (!usr) throw new Error('Credenciais inválidas.');
+    return { id: usr.id, nome: usr.nome, email: usr.email, cargo: usr.cargo, tipo: usr.tipo, filial_id: usr.filial_id, filialId: usr.filial_id };
   }
 
-  if (res.status === 204) return null;
-  return res.json();
+  if (path === '/filiais' && method === 'GET') return mockFiliais;
+  if (path === '/produtos' && method === 'GET') return mockProdutos;
+  if (path === '/produtos' && method === 'POST') {
+    const novoP = { id: mockProdutos.length + 1, sku: body.sku, nome: body.nome, categoria: body.categoria || 'Geral', qtd_minima: body.qtd_minima || 0 };
+    mockProdutos.push(novoP);
+    mockFiliais.forEach(f => mockEstoques.push({ produto_id: novoP.id, filial_id: f.id, quantidade: body.qtd_inicial || 0, status: statusEstoque(body.qtd_inicial || 0, body.qtd_minima || 0) }));
+    return novoP;
+  }
+
+  if (path.startsWith('/estoque') && method === 'GET' && !path.includes('/alertas')) {
+    const urlParams = new URLSearchParams(path.split('?')[1] || '');
+    const fid = urlParams.get('filialId');
+    return fid ? mockEstoques.filter(e => e.filial_id == fid) : mockEstoques;
+  }
+
+  if (path === '/estoque/ajustar' && method === 'POST') {
+    let est = mockEstoques.find(e => e.produto_id == body.produtoId && e.filial_id == body.filialId);
+    if (!est) {
+      est = { produto_id: body.produtoId, filial_id: body.filialId, quantidade: 0, status: 'zerado' };
+      mockEstoques.push(est);
+    }
+    const ant = est.quantidade;
+    est.quantidade = body.tipo === 'entrada' ? est.quantidade + body.quantidade : Math.max(0, est.quantidade - body.quantidade);
+    const prd = mockProdutos.find(p => p.id == body.produtoId);
+    est.status = statusEstoque(est.quantidade, prd ? prd.qtd_minima : 0);
+
+    mockMovimentacoes.unshift({
+      data: new Date().toLocaleString('pt-BR'),
+      produto_id: body.produtoId,
+      produtoNome: prd ? prd.nome : 'Produto',
+      filial_id: body.filialId,
+      filialNome: mockFiliais.find(f => f.id == body.filialId)?.nome || 'Filial',
+      tipo: body.tipo,
+      anterior: ant,
+      nova: est.quantidade,
+      usuario: body.usuario || 'Usuário',
+      motivo: body.motivo || 'Ajuste manual'
+    });
+    return est;
+  }
+
+  if (path === '/transferencias' && method === 'GET') return mockTransferencias;
+  if (path === '/transferencias' && method === 'POST') {
+    const prd = mockProdutos.find(p => p.id == body.produtoId);
+    const orig = mockFiliais.find(f => f.id == body.origemId);
+    const dest = mockFiliais.find(f => f.id == body.destinoId);
+    const novaT = {
+      id: mockTransferencias.length + 1,
+      produto_id: body.produtoId, produtoNome: prd?.nome,
+      origem_id: body.origemId, origemNome: orig?.nome,
+      destino_id: body.destinoId, destinoNome: dest?.nome,
+      quantidade: body.quantidade, solicitante: body.solicitante,
+      data: new Date().toLocaleDateString('pt-BR'), status: 'pendente'
+    };
+    mockTransferencias.unshift(novaT);
+    return novaT;
+  }
+
+  if (path.includes('/transferencias/') && path.endsWith('/concluir')) {
+    const id = path.split('/')[2];
+    const t = mockTransferencias.find(item => item.id == id);
+    if (t) t.status = 'concluida';
+    return t;
+  }
+
+  if (path === '/pedidos' && method === 'GET') return mockPedidos;
+  if (path === '/pedidos' && method === 'POST') {
+    const prd = mockProdutos.find(p => p.id == body.produtoId);
+    const fil = mockFiliais.find(f => f.id == body.filialId);
+    const novoP = {
+      id: mockPedidos.length + 1,
+      produto_id: body.produtoId, produtoNome: prd?.nome,
+      quantidade: body.quantidade, filial_id: body.filialId, filialNome: fil?.nome,
+      solicitante: body.solicitante, data: new Date().toLocaleDateString('pt-BR'), status: 'solicitado'
+    };
+    mockPedidos.unshift(novoP);
+    return novoP;
+  }
+
+  if (path === '/estoque/alertas' && method === 'GET') {
+    const alertas = mockEstoques.filter(e => e.status === 'baixo' || e.status === 'zerado').map(e => {
+      const p = mockProdutos.find(prd => prd.id === e.produto_id) || {};
+      const f = mockFiliais.find(fil => fil.id === e.filial_id) || {};
+      return { ...e, sku: p.sku, produtoNome: p.nome, filialNome: f.nome, quantidadeMinima: p.qtd_minima };
+    });
+    return {
+      totalBaixo: alertas.filter(a => a.status === 'baixo').length,
+      totalZerado: alertas.filter(a => a.status === 'zerado').length,
+      itens: alertas
+    };
+  }
+
+  if (path.startsWith('/historico') && method === 'GET') return mockMovimentacoes;
+
+  if (path.startsWith('/dashboard') && method === 'GET') {
+    const urlParams = new URLSearchParams(path.split('?')[1] || '');
+    const fid = urlParams.get('filialId');
+    const listE = fid ? mockEstoques.filter(e => e.filial_id == fid) : mockEstoques;
+    const totalItens = listE.reduce((sum, e) => sum + e.quantidade, 0);
+    const totalBaixo = listE.filter(e => e.status === 'baixo').length;
+    const totalZerado = listE.filter(e => e.status === 'zerado').length;
+    const estoquePorFilial = mockFiliais.map(f => ({
+      nome: f.nome,
+      total: mockEstoques.filter(e => e.filial_id === f.id).reduce((s, e) => s + e.quantidade, 0)
+    }));
+    return {
+      totalItens,
+      totalProdutos: mockProdutos.length,
+      totalBaixo,
+      totalZerado,
+      totalTransferenciasPendentes: mockTransferencias.filter(t => t.status === 'pendente').length,
+      estoquePorFilial,
+      movimentacoesSemana: { labels: ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'], entradas: [12, 19, 3, 5, 2, 3, 10], saidas: [2, 3, 20, 5, 1, 4, 8] },
+      alertas: mockEstoques.filter(e => e.status === 'baixo' || e.status === 'zerado').map(e => ({
+        ...e,
+        produtoNome: mockProdutos.find(p => p.id === e.produto_id)?.nome,
+        filialNome: mockFiliais.find(f => f.id === e.filial_id)?.nome,
+        quantidadeMinima: mockProdutos.find(p => p.id === e.produto_id)?.qtd_minima
+      }))
+    };
+  }
+
+  return [];
 }
 
 // Endpoints — ajuste os caminhos conforme as rotas definidas no Java.

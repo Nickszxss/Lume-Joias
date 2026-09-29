@@ -35,8 +35,10 @@ public class DatabaseUserInitializer implements CommandLineRunner {
 
             jdbcTemplate.execute("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS cargo VARCHAR(50);");
 
-            cadastrarOuVerificarUsuario("Nicoly", "nicoly.func@empresa.com", "160611", "funcionario", 1L);
-            cadastrarOuVerificarUsuario("Nicoly", "nicoly.grt@empresa.com", "160611", "gerente", null);
+            cadastrarOuVerificarUsuario("Anderson", "anderson.func@empresa.com", "etec2026@DS", "funcionario", 1L);
+            cadastrarOuVerificarUsuario("Robson", "robson.grt@empresa.com", "etec2026@DS", "gerente", null);
+            cadastrarOuVerificarUsuario("Isabella", "isabella.func@empresa.com", "etec2026@DS", "funcionario", 2L);
+            cadastrarOuVerificarUsuario("Manuella", "manuella.grt@empresa.com", "etec2026@DS", "gerente", null);
 
             System.out.println(">>> INICIALIZAÇÃO DE USUÁRIOS CONCLUÍDA COM SUCESSO! <<<");
         } catch (Exception e) {

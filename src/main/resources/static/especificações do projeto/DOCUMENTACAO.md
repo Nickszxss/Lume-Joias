@@ -1,4 +1,4 @@
-# Documentação do Projeto — Lume Joias
+# Documentação do Projeto — Lume Joias (Versão 1.0 do projeto)
 
 ## 1. Link da Aplicação Hospedada
 
@@ -25,8 +25,8 @@ Os usuários abaixo estão cadastrados no banco de dados Supabase (com senhas cr
 ## 3. O que Falta Finalizar na Aplicação
 
 ```text
-- Nenhuma pendência aberta no momento.
-- Todas as rotas do backend Spring Boot (Autenticação, Filiais, Produtos, Estoque, Transferências, Pedidos de Compra, Alertas, Histórico e Dashboard) e a publicação estática no GitHub Pages foram testadas e estão 100% funcionais.
+- Existem alguns erros pontuais que serão corrigidos futuramente.
+- Nem todas as coisas/produtos e registros foram totalmente cadastrados no sistema.
 ```
 
 ---

@@ -1,86 +1,74 @@
-# Especificações do Projeto
+# Especificações e Documentação do Projeto — Lume Joias
 
-## Link da aplicação
+## Link da Aplicação
 
 ```text
 GitHub Pages:
-https://Nickszxss.github.io/Lume-Joias/
+https://nickszxss.github.io/Lume-Joias/
 ```
 
 ---
 
-## Usuários para teste
+## Visão Geral do Projeto
 
-| Nome     | Email                                                         | Senha       | Cargo       |
-| -------- | ------------------------------------------------------------- | ----------- | ----------- |
-| Anderson | [anderson.func@empresa.com](mailto:anderson.func@empresa.com) | etec2026@DS | Funcionário |
-| Robson   | [robson.grt@empresa.com](mailto:robson.grt@empresa.com)       | etec2026@DS | Gerente     |
-| Isabella | [isabella.func@empresa.com](mailto:isabella.func@empresa.com) | etec2026@DS | Funcionário |
-| Manuella | [manuella.grt@empresa.com](mailto:manuella.grt@empresa.com)   | etec2026@DS | Gerente     |
+O **Lume Joias** é um Sistema de Gerenciamento de Estoque (SGE) multi-filial (5 filiais: Centro, Norte, Sul, Leste e Oeste) desenvolvido em Java 17 com **Spring Boot** no backend e um frontend estático responsivo em HTML5, CSS3 e JavaScript. O banco de dados relacional é hospedado no **Supabase (PostgreSQL)**, utilizando pooling e conexão segura via JDBC.
 
 ---
 
-## O que já foi realizado
+## Usuários de Teste (Cadastrados no Banco e Simuláveis)
 
-- [x] Conexão e configuração do banco de dados PostgreSQL via Supabase Pooler (IPv4 e IPv6 compatíveis).
-- [x] Tabela `usuarios` com suporte a enums e BCrypt para senhas.
-- [x] Inicializador automático de usuários (`DatabaseUserInitializer`) para cadastrar/atualizar os 4 usuários solicitados no Supabase na inicialização da aplicação.
-- [x] Suporte a login e diferenciação de permissões entre Funcionário e Gerente no Backend Java (Spring Boot) e Frontend (HTML/CSS/JS).
-- [x] Suporte para execução do frontend no GitHub Pages com fallback estático completo quando hospedado de forma estática, mantendo a simulabilidade do login dos 4 usuários.
-- [x] Ajuste de caminhos relativos de imagens (`img/Lume.png`, `img/LumeEscuro.png`), CSS (`style.css`) e Scripts (`main.js`).
-- [x] Remoção da tag `<base target="_blank">` para garantir funcionamento de links/navegação.
-- [x] Suíte de testes de integração com JUnit 5 (`AuthIntegrationTest`) validando login e tentativas de acesso inválidas para todos os usuários.
+| Nome     | E-mail                        | Senha       | Cargo       | Filial Atribuída |
+| -------- | ----------------------------- | ----------- | ----------- | ---------------- |
+| Anderson | `anderson.func@empresa.com`   | etec2026@DS | Funcionário | Filial Centro (1)|
+| Robson   | `robson.grt@empresa.com`      | etec2026@DS | Gerente     | Todas (Geral)    |
+| Isabella | `isabella.func@empresa.com`   | etec2026@DS | Funcionário | Filial Norte (2) |
+| Manuella | `manuella.grt@empresa.com`    | etec2026@DS | Gerente     | Todas (Geral)    |
 
 ---
 
-## O que ainda falta
+## Funcionalidades e Escopo Concluído
+
+- [x] **Backend Spring Boot 3**:
+  - Rest APIs para Autenticação (`/api/auth/login`), Filiais (`/api/filiais`), Produtos (`/api/produtos`), Estoque (`/api/estoque`), Transferências (`/api/transferencias`), Pedidos de Compra (`/api/pedidos`), Alertas (`/api/estoque/alertas`), Histórico (`/api/historico`) e Dashboard (`/api/dashboard`).
+  - Criptografia de senhas com BCrypt (`PasswordEncoder`).
+  - Povoamento e sincronização automática dos 4 usuários no Supabase ao iniciar a aplicação (`DatabaseUserInitializer`).
+- [x] **Banco de Dados Supabase (PostgreSQL)**:
+  - Compatibilidade IPv4 e IPv6 via Supabase Pooler (`aws-0-us-east-1.pooler.supabase.com`).
+  - Suporte aos enums de status (`status_transferencia` e `status_pedido`).
+- [x] **Frontend Responsivo**:
+  - Interface moderna com suporte a Modo Escuro / Modo Claro.
+  - Painel de Dashboard com métricas KPI e gráficos dinâmicos (Chart.js).
+  - Controle de acesso por perfil (Gerente e Funcionário).
+- [x] **Publicação no GitHub Pages**:
+  - Configuração via GitHub Actions Workflow (`.github/workflows/static.yml`) publicando os recursos estáticos a partir de `src/main/resources/static`.
+  - Fallback local no JavaScript (`main.js`) permitindo testes e simulações completas no GitHub Pages sem expor o backend local.
+  - Imagens do projeto (`Lume.png` e `LumeEscuro.png`) mantidas de forma organizada em `src/main/resources/static/img/`.
+
+---
+
+## Relatório das Modificações Recentes
+
+### Modificação 1: Ajuste e Correção da Publicação no GitHub Pages
+- **Problema:** O GitHub Pages apresentava erro 404/página padrão por divergência de configuração da origem de publicação.
+- **Solução:** Configurado o workflow do GitHub Actions (`.github/workflows/static.yml`) para realizar o upload e deploy do diretório `src/main/resources/static`, garantindo compatibilidade com o servidor Spring Boot e com a hospedagem estática.
+- **Arquivos alterados:**
+  - `.github/workflows/static.yml`
+  - `src/main/resources/static/index.html`
+  - `src/main/resources/static/main.js`
+
+### Modificação 2: Organização e Manutenção dos Recursos Estáticos
+- **Problema:** Existência de diretórios temporários na raiz do repositório.
+- **Solução:** Mantida a estrutura oficial de arquivos estáticos em `src/main/resources/static/`, garantindo que o Spring Boot sirva as páginas e imagens (`/img/Lume.png` e `/img/LumeEscuro.png`) nativamente e o GitHub Pages as publique diretamente do mesmo diretório.
+- **Arquivos alterados:**
+  - `src/main/resources/static/img/Lume.png`
+  - `src/main/resources/static/img/LumeEscuro.png`
+
+---
+
+## Status dos Testes
 
 ```text
-Nenhuma pendência identificada após os testes.
+Testes de Integração e Compilação (Maven / JUnit 5):
+- Tests run: 15, Failures: 0, Errors: 0, Skipped: 0
+- Status: 100% APROVADO
 ```
-
----
-
-## Relatório das modificações
-
-### Modificação 1
-**Modificação:** Atualização do cadastro automático de usuários de inicialização no Supabase.
-**Problema encontrado:** O inicializador de usuários (`DatabaseUserInitializer.java`) registrava dados antigos de teste (ex: Nicoly) com senhas desatualizadas e sem a lista completa dos 4 usuários exigidos no projeto.
-**Solução:** Atualizado o código Java para garantir que os usuários Anderson, Robson, Isabella e Manuella sejam inseridos/atualizados com o hash BCrypt da senha `etec2026@DS` e os cargos/filiais corretos.
-**Arquivos alterados:**
-- `src/main/java/com/nicoly/LumeEstoque/init/DatabaseUserInitializer.java`
-**Teste realizado:** Execução da aplicação via Spring Boot `./mvnw spring-boot:run` e consulta à tabela `usuarios` no Supabase.
-**Resultado:** Todos os 4 usuários foram validados e inseridos com sucesso no Supabase sem duplicidades.
-
----
-
-### Modificação 2
-**Modificação:** Atualização dos testes de integração de autenticação (`AuthIntegrationTest.java`).
-**Problema encontrado:** Os testes automatizados em Java dependiam do email e senha antigos.
-**Solução:** Atualizados os casos de teste para validar o login de Anderson, Robson, Isabella e Manuella com a senha `etec2026@DS`, além de validar falhas de autenticação com credenciais incorretas.
-**Arquivos alterados:**
-- `src/test/java/com/nicoly/LumeEstoque/AuthIntegrationTest.java`
-**Teste realizado:** Execução dos testes automatizados com `./mvnw test`.
-**Resultado:** 15 testes de integração executados e aprovados com 100% de taxa de sucesso.
-
----
-
-### Modificação 3
-**Modificação:** Adaptação da camada Frontend JavaScript (`main.js`) para compatibilidade com GitHub Pages.
-**Problema encontrado:** Quando a aplicação estática roda hospedada no GitHub Pages, requisições diretas a `http://localhost:8080` falham caso o backend Java não esteja rodando localmente na mesma máquina do usuário visualizador.
-**Solução:** Implementado mecanismo no `main.js` que detecta a origem da requisição e atua com fallback para os 4 usuários cadastrados e base estática demonstrativa, evitando exceções no console e permitindo teste do protótipo no GitHub Pages.
-**Arquivos alterados:**
-- `src/main/resources/static/main.js`
-**Teste realizado:** Simulação de requisições de login e navegação estática no navegador.
-**Resultado:** Interface responsiva, sem erros de console e com funcionalidades completas de login e alternância de visualizações.
-
----
-
-### Modificação 4
-**Modificação:** Correção na estrutura de cabeçalho HTML (`index.html`).
-**Problema encontrado:** Existia a tag `<base target="_blank">` que fazia com que interações com links no protótipo abrissem novas abas desnecessariamente.
-**Solução:** A tag foi removida.
-**Arquivos alterados:**
-- `src/main/resources/static/index.html`
-**Teste realizado:** Navegação pelo menu da aplicação.
-**Resultado:** Navegação interna suave na mesma página SPA.

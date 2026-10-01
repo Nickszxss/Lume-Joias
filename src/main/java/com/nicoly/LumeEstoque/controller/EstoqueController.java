@@ -3,9 +3,7 @@ package com.nicoly.LumeEstoque.controller;
 import com.nicoly.LumeEstoque.dto.AjusteEstoqueRequest;
 import com.nicoly.LumeEstoque.dto.AlertasResponse;
 import com.nicoly.LumeEstoque.dto.EstoqueResponse;
-import com.nicoly.LumeEstoque.model.Usuario;
 import com.nicoly.LumeEstoque.service.EstoqueService;
-import com.nicoly.LumeEstoque.service.SecurityService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -19,46 +17,21 @@ import java.util.Map;
 public class EstoqueController {
 
     private final EstoqueService estoqueService;
-    private final SecurityService securityService;
 
-    public EstoqueController(EstoqueService estoqueService, SecurityService securityService) {
+    public EstoqueController(EstoqueService estoqueService) {
         this.estoqueService = estoqueService;
-        this.securityService = securityService;
     }
 
     @GetMapping
-    public ResponseEntity<?> listar(
-            @RequestHeader(value = "X-User-Email", required = false) String userEmail,
-            @RequestHeader(value = "X-User-Role", required = false) String userRole,
-            @RequestParam(required = false) Long filialId) {
-
-        Usuario user = securityService.resolverUsuario(userEmail, userRole, null);
-        if (user != null && "funcionario".equalsIgnoreCase(user.getTipo() != null ? user.getTipo() : user.getCargo())) {
-            if (filialId == null) {
-                filialId = user.getFilialId();
-            } else if (user.getFilialId() != null && !user.getFilialId().equals(filialId)) {
-                return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                        .body(Map.of("message", "Acesso negado: Funcionários só podem visualizar estoque da própria filial."));
-            }
-        }
-
+    public ResponseEntity<List<EstoqueResponse>> listar(@RequestParam(required = false) Long filialId) {
         return ResponseEntity.ok(estoqueService.listarEstoque(filialId));
     }
 
     @PostMapping("/ajustar")
-    public ResponseEntity<?> ajustar(
-            @RequestHeader(value = "X-User-Email", required = false) String userEmail,
-            @RequestHeader(value = "X-User-Role", required = false) String userRole,
-            @RequestBody AjusteEstoqueRequest request) {
+    public ResponseEntity<?> ajustar(@RequestBody AjusteEstoqueRequest request) {
         try {
-            Usuario user = securityService.resolverUsuario(userEmail, userRole, request.getUsuario());
-            securityService.validarAcessoFilial(user, request.getFilialId());
-
             EstoqueResponse response = estoqueService.ajustarEstoque(request);
             return ResponseEntity.ok(response);
-        } catch (SecurityException e) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                    .body(Map.of("message", e.getMessage()));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
         } catch (Exception e) {
@@ -68,21 +41,7 @@ public class EstoqueController {
     }
 
     @GetMapping("/alertas")
-    public ResponseEntity<?> alertas(
-            @RequestHeader(value = "X-User-Email", required = false) String userEmail,
-            @RequestHeader(value = "X-User-Role", required = false) String userRole,
-            @RequestParam(required = false) Long filialId) {
-
-        Usuario user = securityService.resolverUsuario(userEmail, userRole, null);
-        if (user != null && "funcionario".equalsIgnoreCase(user.getTipo() != null ? user.getTipo() : user.getCargo())) {
-            if (filialId == null) {
-                filialId = user.getFilialId();
-            } else if (user.getFilialId() != null && !user.getFilialId().equals(filialId)) {
-                return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                        .body(Map.of("message", "Acesso negado: Funcionários só podem visualizar alertas da própria filial."));
-            }
-        }
-
+    public ResponseEntity<AlertasResponse> alertas(@RequestParam(required = false) Long filialId) {
         return ResponseEntity.ok(estoqueService.listarAlertas(filialId));
     }
 }

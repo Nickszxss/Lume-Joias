@@ -2,8 +2,6 @@ package com.nicoly.LumeEstoque.controller;
 
 import com.nicoly.LumeEstoque.dto.TransferenciaRequest;
 import com.nicoly.LumeEstoque.dto.TransferenciaResponse;
-import com.nicoly.LumeEstoque.model.Usuario;
-import com.nicoly.LumeEstoque.service.SecurityService;
 import com.nicoly.LumeEstoque.service.TransferenciaService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -18,11 +16,9 @@ import java.util.Map;
 public class TransferenciaController {
 
     private final TransferenciaService transferenciaService;
-    private final SecurityService securityService;
 
-    public TransferenciaController(TransferenciaService transferenciaService, SecurityService securityService) {
+    public TransferenciaController(TransferenciaService transferenciaService) {
         this.transferenciaService = transferenciaService;
-        this.securityService = securityService;
     }
 
     @GetMapping
@@ -31,19 +27,10 @@ public class TransferenciaController {
     }
 
     @PostMapping
-    public ResponseEntity<?> solicitar(
-            @RequestHeader(value = "X-User-Email", required = false) String userEmail,
-            @RequestHeader(value = "X-User-Role", required = false) String userRole,
-            @RequestBody TransferenciaRequest request) {
+    public ResponseEntity<?> solicitar(@RequestBody TransferenciaRequest request) {
         try {
-            Usuario user = securityService.resolverUsuario(userEmail, userRole, request.getSolicitante());
-            securityService.validarOrigemTransferencia(user, request.getOrigemId());
-
             TransferenciaResponse response = transferenciaService.solicitar(request);
             return ResponseEntity.status(HttpStatus.CREATED).body(response);
-        } catch (SecurityException e) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                    .body(Map.of("message", e.getMessage()));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
         } catch (Exception e) {

@@ -51,6 +51,10 @@ public class ProdutoService {
         int qtdMinima = request.getQtdMinima() != null ? request.getQtdMinima() : 10;
         int qtdInicial = request.getQtdInicial() != null ? request.getQtdInicial() : 0;
 
+        if (qtdMinima < 0 || qtdInicial < 0) {
+            throw new IllegalArgumentException("Quantidades não podem ser negativas.");
+        }
+
         jdbcTemplate.update("""
             INSERT INTO produtos (nome, descricao, codigo, unidade_medida, qtd_minima, ativo)
             VALUES (?, ?, ?, ?, ?, true)

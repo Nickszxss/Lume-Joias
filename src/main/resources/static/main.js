@@ -4,211 +4,35 @@
    Este arquivo apenas consome a API e atualiza a tela.
    ===================================================================== */
 
-// ---------- CONFIGURAÇÃO DA API E BASE DADOS DEMO/STATIC ----------
+// ---------- CONFIGURAÇÃO DA API ----------
 const IS_LOCAL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-const API_BASE_URL = IS_LOCAL ? 'http://localhost:8080/api' : '/api';
+const API_BASE_URL = window.LUME_API_URL || (IS_LOCAL ? 'http://localhost:8080/api' : '/api');
 
-// Usuários válidos para fallback no GitHub Pages / frontend estático
-const MOCK_USUARIOS = [
-  { id: 1, nome: 'Anderson', email: 'anderson.func@empresa.com', senha: 'etec2026@DS', cargo: 'funcionario', tipo: 'funcionario', filial_id: 1 },
-  { id: 2, nome: 'Robson', email: 'robson.grt@empresa.com', senha: 'etec2026@DS', cargo: 'gerente', tipo: 'gerente', filial_id: null },
-  { id: 3, nome: 'Isabella', email: 'isabella.func@empresa.com', senha: 'etec2026@DS', cargo: 'funcionario', tipo: 'funcionario', filial_id: 2 },
-  { id: 4, nome: 'Manuella', email: 'manuella.grt@empresa.com', senha: 'etec2026@DS', cargo: 'gerente', tipo: 'gerente', filial_id: null }
-];
-
-// Fallback de dados estáticos para simulação completa no GitHub Pages quando backend Java não estiver exposto publicamente
-let mockFiliais = [
-  { id: 1, nome: 'Filial Centro' },
-  { id: 2, nome: 'Filial Norte' },
-  { id: 3, nome: 'Filial Sul' },
-  { id: 4, nome: 'Filial Leste' },
-  { id: 5, nome: 'Filial Oeste' }
-];
-
-let mockProdutos = [
-  { id: 1, sku: 'JOIA-001', nome: 'Anel de Ouro 18k', categoria: 'Aneis', qtd_minima: 5 },
-  { id: 2, sku: 'JOIA-002', nome: 'Colar de Prata 925', categoria: 'Colares', qtd_minima: 10 },
-  { id: 3, sku: 'JOIA-003', nome: 'Brinco de Diamante', categoria: 'Brincos', qtd_minima: 3 }
-];
-
-let mockEstoques = [
-  { produto_id: 1, filial_id: 1, quantidade: 12, status: 'suficiente' },
-  { produto_id: 1, filial_id: 2, quantidade: 2, status: 'baixo' },
-  { produto_id: 2, filial_id: 1, quantidade: 15, status: 'suficiente' },
-  { produto_id: 2, filial_id: 2, quantidade: 0, status: 'zerado' },
-  { produto_id: 3, filial_id: 1, quantidade: 1, status: 'baixo' }
-];
-
-let mockTransferencias = [
-  { id: 1, produto_id: 1, produtoNome: 'Anel de Ouro 18k', origem_id: 1, origemNome: 'Filial Centro', destino_id: 2, destinoNome: 'Filial Norte', quantidade: 2, solicitante: 'Anderson', data: new Date().toLocaleDateString('pt-BR'), status: 'pendente' }
-];
-
-let mockPedidos = [
-  { id: 1, produto_id: 2, produtoNome: 'Colar de Prata 925', quantidade: 20, filial_id: 2, filialNome: 'Filial Norte', solicitante: 'Robson', data: new Date().toLocaleDateString('pt-BR'), status: 'solicitado' }
-];
-
-let mockMovimentacoes = [
-  { data: new Date().toLocaleString('pt-BR'), produto_id: 1, produtoNome: 'Anel de Ouro 18k', filial_id: 1, filialNome: 'Filial Centro', tipo: 'entrada', anterior: 10, nova: 12, usuario: 'Anderson', motivo: 'Carga inicial de estoque' }
-];
-
-// Wrapper único de fetch: centraliza headers, tratamento de erro, JSON e fallback local para GitHub Pages.
+// Wrapper único de fetch: centraliza headers, tratamento de erro e JSON.
 async function apiRequest(path, options = {}) {
-  try {
-    const res = await fetch(`${API_BASE_URL}${path}`, {
-      headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
-      ...options
-    });
-
-    if (!res.ok) {
-      let msg = `Erro ${res.status}`;
-      try { const body = await res.json(); msg = body.message || msg; } catch (_) {}
-      throw new Error(msg);
-    }
-
-    if (res.status === 204) return null;
-    return await res.json();
-  } catch (err) {
-    // Caso esteja rodando sem o backend Java ativo (ex: GitHub Pages puro), executa fallback funcional
-    return resolverMockLocal(path, options);
+  const customHeaders = options.headers || {};
+  if (usuario) {
+    if (usuario.email) customHeaders['X-User-Email'] = usuario.email;
+    const userRole = usuario.cargo || usuario.tipo;
+    if (userRole) customHeaders['X-User-Role'] = userRole;
   }
+
+  const res = await fetch(`${API_BASE_URL}${path}`, {
+    headers: { 'Content-Type': 'application/json', ...customHeaders },
+    ...options
+  });
+
+  if (!res.ok) {
+    let msg = `Erro ${res.status}`;
+    try { const body = await res.json(); msg = body.message || msg; } catch (_) {}
+    throw new Error(msg);
+  }
+
+  if (res.status === 204) return null;
+  return await res.json();
 }
 
-function resolverMockLocal(path, options) {
-  const method = (options.method || 'GET').toUpperCase();
-  const body = options.body ? JSON.parse(options.body) : {};
-
-  if (path === '/auth/login' && method === 'POST') {
-    const usr = MOCK_USUARIOS.find(u => u.email.toLowerCase() === (body.email || '').toLowerCase() && u.senha === body.senha);
-    if (!usr) throw new Error('Credenciais inválidas.');
-    return { id: usr.id, nome: usr.nome, email: usr.email, cargo: usr.cargo, tipo: usr.tipo, filial_id: usr.filial_id, filialId: usr.filial_id };
-  }
-
-  if (path === '/filiais' && method === 'GET') return mockFiliais;
-  if (path === '/produtos' && method === 'GET') return mockProdutos;
-  if (path === '/produtos' && method === 'POST') {
-    const novoP = { id: mockProdutos.length + 1, sku: body.sku, nome: body.nome, categoria: body.categoria || 'Geral', qtd_minima: body.qtd_minima || 0 };
-    mockProdutos.push(novoP);
-    mockFiliais.forEach(f => mockEstoques.push({ produto_id: novoP.id, filial_id: f.id, quantidade: body.qtd_inicial || 0, status: statusEstoque(body.qtd_inicial || 0, body.qtd_minima || 0) }));
-    return novoP;
-  }
-
-  if (path.startsWith('/estoque') && method === 'GET' && !path.includes('/alertas')) {
-    const urlParams = new URLSearchParams(path.split('?')[1] || '');
-    const fid = urlParams.get('filialId');
-    return fid ? mockEstoques.filter(e => e.filial_id == fid) : mockEstoques;
-  }
-
-  if (path === '/estoque/ajustar' && method === 'POST') {
-    let est = mockEstoques.find(e => e.produto_id == body.produtoId && e.filial_id == body.filialId);
-    if (!est) {
-      est = { produto_id: body.produtoId, filial_id: body.filialId, quantidade: 0, status: 'zerado' };
-      mockEstoques.push(est);
-    }
-    const ant = est.quantidade;
-    est.quantidade = body.tipo === 'entrada' ? est.quantidade + body.quantidade : Math.max(0, est.quantidade - body.quantidade);
-    const prd = mockProdutos.find(p => p.id == body.produtoId);
-    est.status = statusEstoque(est.quantidade, prd ? prd.qtd_minima : 0);
-
-    mockMovimentacoes.unshift({
-      data: new Date().toLocaleString('pt-BR'),
-      produto_id: body.produtoId,
-      produtoNome: prd ? prd.nome : 'Produto',
-      filial_id: body.filialId,
-      filialNome: mockFiliais.find(f => f.id == body.filialId)?.nome || 'Filial',
-      tipo: body.tipo,
-      anterior: ant,
-      nova: est.quantidade,
-      usuario: body.usuario || 'Usuário',
-      motivo: body.motivo || 'Ajuste manual'
-    });
-    return est;
-  }
-
-  if (path === '/transferencias' && method === 'GET') return mockTransferencias;
-  if (path === '/transferencias' && method === 'POST') {
-    const prd = mockProdutos.find(p => p.id == body.produtoId);
-    const orig = mockFiliais.find(f => f.id == body.origemId);
-    const dest = mockFiliais.find(f => f.id == body.destinoId);
-    const novaT = {
-      id: mockTransferencias.length + 1,
-      produto_id: body.produtoId, produtoNome: prd?.nome,
-      origem_id: body.origemId, origemNome: orig?.nome,
-      destino_id: body.destinoId, destinoNome: dest?.nome,
-      quantidade: body.quantidade, solicitante: body.solicitante,
-      data: new Date().toLocaleDateString('pt-BR'), status: 'pendente'
-    };
-    mockTransferencias.unshift(novaT);
-    return novaT;
-  }
-
-  if (path.includes('/transferencias/') && path.endsWith('/concluir')) {
-    const id = path.split('/')[2];
-    const t = mockTransferencias.find(item => item.id == id);
-    if (t) t.status = 'concluida';
-    return t;
-  }
-
-  if (path === '/pedidos' && method === 'GET') return mockPedidos;
-  if (path === '/pedidos' && method === 'POST') {
-    const prd = mockProdutos.find(p => p.id == body.produtoId);
-    const fil = mockFiliais.find(f => f.id == body.filialId);
-    const novoP = {
-      id: mockPedidos.length + 1,
-      produto_id: body.produtoId, produtoNome: prd?.nome,
-      quantidade: body.quantidade, filial_id: body.filialId, filialNome: fil?.nome,
-      solicitante: body.solicitante, data: new Date().toLocaleDateString('pt-BR'), status: 'solicitado'
-    };
-    mockPedidos.unshift(novoP);
-    return novoP;
-  }
-
-  if (path === '/estoque/alertas' && method === 'GET') {
-    const alertas = mockEstoques.filter(e => e.status === 'baixo' || e.status === 'zerado').map(e => {
-      const p = mockProdutos.find(prd => prd.id === e.produto_id) || {};
-      const f = mockFiliais.find(fil => fil.id === e.filial_id) || {};
-      return { ...e, sku: p.sku, produtoNome: p.nome, filialNome: f.nome, quantidadeMinima: p.qtd_minima };
-    });
-    return {
-      totalBaixo: alertas.filter(a => a.status === 'baixo').length,
-      totalZerado: alertas.filter(a => a.status === 'zerado').length,
-      itens: alertas
-    };
-  }
-
-  if (path.startsWith('/historico') && method === 'GET') return mockMovimentacoes;
-
-  if (path.startsWith('/dashboard') && method === 'GET') {
-    const urlParams = new URLSearchParams(path.split('?')[1] || '');
-    const fid = urlParams.get('filialId');
-    const listE = fid ? mockEstoques.filter(e => e.filial_id == fid) : mockEstoques;
-    const totalItens = listE.reduce((sum, e) => sum + e.quantidade, 0);
-    const totalBaixo = listE.filter(e => e.status === 'baixo').length;
-    const totalZerado = listE.filter(e => e.status === 'zerado').length;
-    const estoquePorFilial = mockFiliais.map(f => ({
-      nome: f.nome,
-      total: mockEstoques.filter(e => e.filial_id === f.id).reduce((s, e) => s + e.quantidade, 0)
-    }));
-    return {
-      totalItens,
-      totalProdutos: mockProdutos.length,
-      totalBaixo,
-      totalZerado,
-      totalTransferenciasPendentes: mockTransferencias.filter(t => t.status === 'pendente').length,
-      estoquePorFilial,
-      movimentacoesSemana: { labels: ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'], entradas: [12, 19, 3, 5, 2, 3, 10], saidas: [2, 3, 20, 5, 1, 4, 8] },
-      alertas: mockEstoques.filter(e => e.status === 'baixo' || e.status === 'zerado').map(e => ({
-        ...e,
-        produtoNome: mockProdutos.find(p => p.id === e.produto_id)?.nome,
-        filialNome: mockFiliais.find(f => f.id === e.filial_id)?.nome,
-        quantidadeMinima: mockProdutos.find(p => p.id === e.produto_id)?.qtd_minima
-      }))
-    };
-  }
-
-  return [];
-}
-
-// Endpoints — ajuste os caminhos conforme as rotas definidas no Java.
+// Endpoints
 const api = {
   login:               (dados)          => apiRequest('/auth/login', { method: 'POST', body: JSON.stringify(dados) }),
 
@@ -227,7 +51,7 @@ const api = {
   listarPedidos:       ()               => apiRequest('/pedidos'),
   criarPedido:         (dados)          => apiRequest('/pedidos', { method: 'POST', body: JSON.stringify(dados) }),
 
-  listarAlertas:       ()               => apiRequest('/estoque/alertas'),
+  listarAlertas:       (filialId)       => apiRequest(`/estoque/alertas${filialId ? `?filialId=${filialId}` : ''}`),
   listarHistorico:     (filtros = {})   => {
     const qs = new URLSearchParams(filtros).toString();
     return apiRequest(`/historico${qs ? `?${qs}` : ''}`);
@@ -287,7 +111,6 @@ const nomeProduto = id => produtos.find(p=>p.id===id)?.nome || '—';
 const skuProduto = id => produtos.find(p=>p.id===id)?.sku || '—';
 const minProduto = id => produtos.find(p=>p.id===id)?.qtd_minima || 0;
 
-// Se o backend já enviar o status pronto (recomendado), use e.status em vez desta função.
 function statusEstoque(qtd, min){
   if(qtd === 0) return 'zerado';
   if(qtd <= min) return 'baixo';
@@ -328,15 +151,6 @@ async function fazerLogin(){
   } catch (err) {
     toast(err.message || 'Acesso negado. Credenciais inválidas.', true);
   }
-}
-
-// Atalho para testar o layout sem o backend rodando ainda.
-function simularLogin(tipo){
-  const nomeInput = $('login-nome') ? $('login-nome').value.trim() : '';
-  const nome = nomeInput || (tipo === 'gerente' ? 'Gerente' : 'Funcionário');
-  aplicarLogin(tipo === 'gerente'
-    ? {nome, tipo:'gerente', cargo:'gerente', filial_id:null}
-    : {nome, tipo:'funcionario', cargo:'funcionario', filial_id:1});
 }
 
 async function aplicarLogin(dadosUsuario){
@@ -380,11 +194,7 @@ async function carregarFiliais(){
   try {
     FILIAIS = await api.listarFiliais();
   } catch (err) {
-    // Fallback local apenas para o protótipo funcionar sem backend.
-    FILIAIS = [
-      {id:1, nome:'Filial Centro'}, {id:2, nome:'Filial Norte'}, {id:3, nome:'Filial Sul'},
-      {id:4, nome:'Filial Leste'}, {id:5, nome:'Filial Oeste'}
-    ];
+    toast('Não foi possível carregar a lista de filiais.', true);
   }
 }
 
@@ -408,19 +218,29 @@ function irPara(page){
 // ---------- FILTROS DE FILIAL ----------
 function montarFiltros(){
   const vis = filiaisVisiveis();
-  const html = vis.map(f=>`<button onclick="setFilialDash(${f.id},this)">${f.nome.replace('Filial ','')}</button>`).join('');
-  $('dash-filiais').innerHTML = `<button class="on" onclick="setFilialDash(null,this)">${usuario.tipo==='gerente'?'Todas':'Minha filial'}</button>` + html;
-  $('estoque-filiais').innerHTML = `<button class="on" onclick="setFilialEstoque(null,this)">${usuario.tipo==='gerente'?'Todas':'Minha filial'}</button>` + html;
-  $('hist-filial').innerHTML = '<option value="">Todas as filiais</option>' +
-    vis.map(f=>`<option value="${f.id}">${f.nome}</option>`).join('');
+  if (usuario.tipo === 'funcionario') {
+    filialDashSel = usuario.filial_id;
+    filialEstoqueSel = usuario.filial_id;
+    $('dash-filiais').innerHTML = `<button class="on" disabled>${nomeFilial(usuario.filial_id)}</button>`;
+    $('estoque-filiais').innerHTML = `<button class="on" disabled>${nomeFilial(usuario.filial_id)}</button>`;
+    $('hist-filial').innerHTML = `<option value="${usuario.filial_id}">${nomeFilial(usuario.filial_id)}</option>`;
+  } else {
+    const html = vis.map(f=>`<button onclick="setFilialDash(${f.id},this)">${f.nome.replace('Filial ','')}</button>`).join('');
+    $('dash-filiais').innerHTML = `<button class="on" onclick="setFilialDash(null,this)">Todas</button>` + html;
+    $('estoque-filiais').innerHTML = `<button class="on" onclick="setFilialEstoque(null,this)">Todas</button>` + html;
+    $('hist-filial').innerHTML = '<option value="">Todas as filiais</option>' +
+      vis.map(f=>`<option value="${f.id}">${f.nome}</option>`).join('');
+  }
 }
 function setFilialDash(id, btn){
+  if (usuario.tipo === 'funcionario') return;
   filialDashSel = id;
   $('dash-filiais').querySelectorAll('button').forEach(b=>b.classList.remove('on'));
   btn.classList.add('on');
   renderDashboard();
 }
 function setFilialEstoque(id, btn){
+  if (usuario.tipo === 'funcionario') return;
   filialEstoqueSel = id;
   $('estoque-filiais').querySelectorAll('button').forEach(b=>b.classList.remove('on'));
   btn.classList.add('on');
@@ -430,8 +250,8 @@ function setFilialEstoque(id, btn){
 // ---------- DASHBOARD ----------
 async function renderDashboard(){
   try {
-    // Ideal: o backend já devolve os KPIs calculados e os dados dos gráficos prontos.
-    const dados = await api.resumoDashboard(filialDashSel);
+    const targetFilial = usuario.tipo === 'funcionario' ? usuario.filial_id : filialDashSel;
+    const dados = await api.resumoDashboard(targetFilial);
     estoques = dados.estoques || [];
     produtos = dados.produtos || produtos;
     transferencias = dados.transferenciasPendentes || transferencias;
@@ -444,7 +264,7 @@ async function renderDashboard(){
 }
 
 function pintarKpis(dados){
-  const fid = filialDashSel;
+  const fid = usuario.tipo === 'funcionario' ? usuario.filial_id : filialDashSel;
   $('dash-kpis').innerHTML = `
     <div class="card kpi"><span class="label">Itens em estoque</span><span class="value">${dados.totalItens ?? 0}</span><span class="badge info">${fid?nomeFilial(fid):'5 filiais'}</span></div>
     <div class="card kpi"><span class="label">Produtos cadastrados</span><span class="value">${dados.totalProdutos ?? produtos.length}</span><span class="badge ok">ativos</span></div>
@@ -459,7 +279,7 @@ function pintarGraficos(dados){
   const gridColor = isDark ? '#2c2c3355' : '#e4e4e7';
   const roseColor = isDark ? '#c65b7e' : '#9d3b5c';
 
-  const porFilial = dados.estoquePorFilial || []; // [{nome, total}]
+  const porFilial = dados.estoquePorFilial || [];
   if(chartFilial) chartFilial.destroy();
   chartFilial = new Chart($('chart-estoque-filial'), {
     type:'bar',
@@ -507,7 +327,8 @@ async function renderProdutos(){
   mostrarLoading($('tbody-produtos'));
   try {
     produtos = await api.listarProdutos();
-    estoques = await api.listarEstoque();
+    const targetFilial = usuario.tipo === 'funcionario' ? usuario.filial_id : null;
+    estoques = await api.listarEstoque(targetFilial);
     pintarProdutos();
   } catch (err) {
     $('tbody-produtos').innerHTML = '<tr><td colspan="8" class="empty-state">Não foi possível carregar os produtos.</td></tr>';
@@ -527,25 +348,28 @@ function pintarProdutos(){
   produtos
     .filter(p => p.nome.toLowerCase().includes(busca) || p.sku.toLowerCase().includes(busca))
     .forEach(p => {
-      estoques.filter(e => e.produto_id === p.id).forEach(e => {
-        const status = e.status ?? statusEstoque(e.quantidade, p.qtd_minima);
-        if(st && status !== st) return;
-        html += `
-          <tr>
-            <td><code>${p.sku}</code></td>
-            <td><b>${p.nome}</b></td>
-            <td>${p.categoria}</td>
-            <td>${p.qtd_minima}</td>
-            <td>${nomeFilial(e.filial_id)}</td>
-            <td>${e.quantidade}</td>
-            <td><span class="badge ${status==='zerado'?'danger':status==='baixo'?'warn':'ok'}">${STATUS_LABEL[status]}</span></td>
-            <td><button class="btn-sm btn-secondary" onclick="abrirModalAjuste(${p.id}, ${e.filial_id})">Ajustar</button></td>
-          </tr>`;
-      });
+      estoques
+        .filter(e => e.produto_id === p.id)
+        .filter(e => usuario.tipo !== 'funcionario' || e.filial_id === usuario.filial_id)
+        .forEach(e => {
+          const status = e.status ?? statusEstoque(e.quantidade, p.qtd_minima);
+          if(st && status !== st) return;
+          html += `
+            <tr>
+              <td><code>${p.sku}</code></td>
+              <td><b>${p.nome}</b></td>
+              <td>${p.categoria}</td>
+              <td>${p.qtd_minima}</td>
+              <td>${nomeFilial(e.filial_id)}</td>
+              <td>${e.quantidade}</td>
+              <td><span class="badge ${status==='zerado'?'danger':status==='baixo'?'warn':'ok'}">${STATUS_LABEL[status]}</span></td>
+              <td><button class="btn-sm btn-secondary" onclick="abrirModalAjuste(${p.id}, ${e.filial_id})">Ajustar</button></td>
+            </tr>`;
+        });
     });
   $('tbody-produtos').innerHTML = html || '<tr><td colspan="8" class="empty-state">Nenhum produto encontrado.</td></tr>';
 }
-function renderProdutosFiltro(){ pintarProdutos(); } // usado nos oninput/onchange da tela
+function renderProdutosFiltro(){ pintarProdutos(); }
 
 function abrirModalProduto(){
   $('modal-overlay').classList.add('active');
@@ -560,6 +384,7 @@ async function salvarProduto(){
   const qtd_inicial = parseInt($('p-qtd').value) || 0;
 
   if(!nome || !sku){ toast('Preencha Nome e SKU.', true); return; }
+  if(qtd_minima < 0 || qtd_inicial < 0){ toast('Quantidades não podem ser negativas.', true); return; }
 
   try {
     await api.criarProduto({ nome, sku, categoria, qtd_minima, qtd_inicial });
@@ -575,7 +400,8 @@ async function salvarProduto(){
 async function renderEstoque(){
   mostrarLoading($('tbody-estoque'));
   try {
-    estoques = await api.listarEstoque(filialEstoqueSel);
+    const targetFilial = usuario.tipo === 'funcionario' ? usuario.filial_id : filialEstoqueSel;
+    estoques = await api.listarEstoque(targetFilial);
     if(produtos.length === 0) produtos = await api.listarProdutos();
     pintarEstoque();
   } catch (err) {
@@ -604,6 +430,10 @@ function pintarEstoque(){
 }
 
 function abrirModalAjuste(pid, fid){
+  if (usuario.tipo === 'funcionario' && usuario.filial_id !== fid) {
+    toast('Você só pode alterar o estoque da sua própria filial.', true);
+    return;
+  }
   ajusteTarget = {pid, fid};
   $('ajuste-titulo').textContent = `Ajustar: ${nomeProduto(pid)} (${nomeFilial(fid)})`;
   $('modal-overlay').classList.add('active');
@@ -615,7 +445,7 @@ async function salvarAjuste(){
   const quantidade = parseInt($('a-qtd').value) || 0;
   const motivo = $('a-motivo').value.trim();
 
-  if(quantidade <= 0){ toast('Informe uma quantidade válida.', true); return; }
+  if(quantidade <= 0){ toast('Informe uma quantidade válida maior que zero.', true); return; }
 
   try {
     await api.ajustarEstoque({
@@ -672,7 +502,11 @@ async function abrirModalTransferencia(){
   if(produtos.length === 0){ toast('Cadastre ao menos um produto antes de transferir.', true); return; }
 
   $('t-produto').innerHTML = produtos.map(p=>`<option value="${p.id}">${p.nome}</option>`).join('');
-  $('t-origem').innerHTML = FILIAIS.map(f=>`<option value="${f.id}">${f.nome}</option>`).join('');
+
+  const filiaisOrigem = usuario.tipo === 'funcionario'
+    ? FILIAIS.filter(f => f.id === usuario.filial_id)
+    : FILIAIS;
+  $('t-origem').innerHTML = filiaisOrigem.map(f=>`<option value="${f.id}">${f.nome}</option>`).join('');
   $('t-destino').innerHTML = FILIAIS.map(f=>`<option value="${f.id}">${f.nome}</option>`).join('');
 
   $('modal-overlay').classList.add('active');
@@ -685,7 +519,12 @@ async function salvarTransferencia(){
   const destinoId = parseInt($('t-destino').value);
   const quantidade = parseInt($('t-qtd').value) || 0;
 
+  if(quantidade <= 0){ toast('Informe uma quantidade válida maior que zero.', true); return; }
   if(origemId === destinoId){ toast('Origem e Destino devem ser diferentes.', true); return; }
+  if(usuario.tipo === 'funcionario' && origemId !== usuario.filial_id){
+    toast('Funcionários só podem originar transferências de sua própria filial.', true);
+    return;
+  }
 
   try {
     await api.criarTransferencia({ produtoId, origemId, destinoId, quantidade, solicitante: usuario.nome });
@@ -735,6 +574,10 @@ function pintarPedidos(){
 }
 
 async function abrirModalPedido(){
+  if (usuario.tipo !== 'gerente') {
+    toast('Apenas gerentes podem criar pedidos de compra.', true);
+    return;
+  }
   try {
     if(produtos.length === 0) produtos = await api.listarProdutos();
   } catch (err) {
@@ -751,9 +594,15 @@ async function abrirModalPedido(){
 }
 
 async function salvarPedido(){
+  if (usuario.tipo !== 'gerente') {
+    toast('Apenas gerentes podem criar pedidos de compra.', true);
+    return;
+  }
   const produtoId = parseInt($('pc-produto').value);
   const filialId = parseInt($('pc-filial').value);
   const quantidade = parseInt($('pc-qtd').value) || 0;
+
+  if(quantidade <= 0){ toast('Informe uma quantidade válida maior que zero.', true); return; }
 
   try {
     await api.criarPedido({ produtoId, filialId, quantidade, solicitante: usuario.nome });
@@ -769,8 +618,8 @@ async function salvarPedido(){
 async function renderAlertas(){
   mostrarLoading($('tbody-alertas'));
   try {
-    const dados = await api.listarAlertas();
-    // Espera-se { totalBaixo, totalZerado, itens: [...] }
+    const targetFilial = usuario.tipo === 'funcionario' ? usuario.filial_id : null;
+    const dados = await api.listarAlertas(targetFilial);
     $('alertas-kpis').innerHTML = `
       <div class="card kpi"><span class="label">Estoque Baixo</span><span class="value" style="color:var(--warn-color)">${dados.totalBaixo ?? 0}</span></div>
       <div class="card kpi"><span class="label">Estoque Zerado</span><span class="value" style="color:var(--danger-color)">${dados.totalZerado ?? 0}</span></div>`;
@@ -797,7 +646,7 @@ async function renderAlertas(){
 async function renderHistorico(){
   mostrarLoading($('tbody-historico'));
   const tipo = $('hist-tipo').value;
-  const filialId = $('hist-filial').value;
+  const filialId = usuario.tipo === 'funcionario' ? usuario.filial_id : $('hist-filial').value;
 
   try {
     movimentacoes = await api.listarHistorico({ ...(tipo && {tipo}), ...(filialId && {filialId}) });

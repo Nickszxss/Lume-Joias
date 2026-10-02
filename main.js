@@ -78,7 +78,11 @@ function resolverMockLocal(path, options) {
   const body = options.body ? JSON.parse(options.body) : {};
 
   if (path === '/auth/login' && method === 'POST') {
-    const usr = MOCK_USUARIOS.find(u => u.email.toLowerCase() === (body.email || '').toLowerCase() && u.senha === body.senha);
+    const usr = MOCK_USUARIOS.find(u =>
+      u.nome.toLowerCase() === (body.nome || '').trim().toLowerCase() &&
+      u.email.toLowerCase() === (body.email || '').trim().toLowerCase() &&
+      u.senha === body.senha
+    );
     if (!usr) throw new Error('Credenciais inválidas.');
     return { id: usr.id, nome: usr.nome, email: usr.email, cargo: usr.cargo, tipo: usr.tipo, filial_id: usr.filial_id, filialId: usr.filial_id };
   }
@@ -315,15 +319,17 @@ function mostrarLoading(el){
 
 // ---------- LOGIN ----------
 async function fazerLogin(){
+  const nomeInput = $('login-nome');
   const emailInput = $('login-email');
   const senhaInput = $('login-senha');
+  const nome = nomeInput ? nomeInput.value.trim() : '';
   const email = emailInput ? emailInput.value.trim() : '';
   const senha = senhaInput ? senhaInput.value : '';
 
-  if(!email || !senha){ toast('E-mail e senha são obrigatórios.', true); return; }
+  if(!nome || !email || !senha){ toast('Nome, e-mail e senha são obrigatórios.', true); return; }
 
   try {
-    const resposta = await api.login({ email, senha });
+    const resposta = await api.login({ nome, email, senha });
     aplicarLogin(resposta);
   } catch (err) {
     toast(err.message || 'Acesso negado. Credenciais inválidas.', true);

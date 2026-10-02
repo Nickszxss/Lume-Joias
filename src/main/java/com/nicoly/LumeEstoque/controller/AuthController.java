@@ -20,7 +20,7 @@ public class AuthController {
         this.authService = authService;
     }
 
-    @PostMapping("/login")
+    @PostMapping(value = {"/login", "/login/"})
     public ResponseEntity<?> login(@RequestBody(required = false) LoginRequest request) {
         if (request == null) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
@@ -37,5 +37,26 @@ public class AuthController {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                     .body(Map.of("message", e.getMessage()));
         }
+    }
+
+    @GetMapping(value = {"/login", "/login/"})
+    public ResponseEntity<?> loginGet(
+            @RequestParam(value = "nome", required = false) String nome,
+            @RequestParam(value = "email", required = false) String email,
+            @RequestParam(value = "senha", required = false) String senha) {
+        if (nome != null && email != null && senha != null) {
+            try {
+                LoginResponse response = authService.autenticar(new LoginRequest(email, senha, nome));
+                return ResponseEntity.ok(response);
+            } catch (IllegalArgumentException e) {
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                        .body(Map.of("message", e.getMessage()));
+            } catch (RuntimeException e) {
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                        .body(Map.of("message", e.getMessage()));
+            }
+        }
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(Map.of("message", "Utilize o método POST para enviar o JSON com nome, e-mail e senha para realizar o login."));
     }
 }

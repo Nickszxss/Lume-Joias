@@ -21,9 +21,11 @@ public class AuthService {
     }
 
     public LoginResponse autenticar(LoginRequest request) {
-        if (request == null || request.getEmail() == null || request.getEmail().trim().isEmpty() ||
+        if (request == null ||
+            request.getNome() == null || request.getNome().trim().isEmpty() ||
+            request.getEmail() == null || request.getEmail().trim().isEmpty() ||
             request.getSenha() == null || request.getSenha().trim().isEmpty()) {
-            throw new IllegalArgumentException("E-mail e senha são obrigatórios.");
+            throw new IllegalArgumentException("Nome, e-mail e senha são obrigatórios.");
         }
 
         Optional<Usuario> usuarioOpt = usuarioRepository.buscarPorEmail(request.getEmail().trim());
@@ -32,6 +34,10 @@ public class AuthService {
         }
 
         Usuario usuario = usuarioOpt.get();
+
+        if (usuario.getNome() == null || !usuario.getNome().trim().equalsIgnoreCase(request.getNome().trim())) {
+            throw new RuntimeException("Credenciais inválidas.");
+        }
 
         boolean senhaValida = false;
         // Tenta BCrypt primeiro; fallback para texto plano se não for hash BCrypt

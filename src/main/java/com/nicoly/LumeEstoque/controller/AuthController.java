@@ -24,7 +24,7 @@ public class AuthController {
     public ResponseEntity<?> login(@RequestBody(required = false) LoginRequest request) {
         if (request == null) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                    .body(Map.of("message", "E-mail e senha são obrigatórios."));
+                    .body(Map.of("message", "Nome, e-mail e senha são obrigatórios."));
         }
 
         try {

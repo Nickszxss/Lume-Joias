@@ -35,6 +35,7 @@ Os usuários abaixo estão cadastrados no banco de dados Supabase (com senhas cr
 
 ### Arquitetura
 - **Backend:** Java 17 com Spring Boot 3.
+- **Autenticação:** Endpoint `POST /api/auth/login` validando obrigatoriamente Nome, E-mail e Senha enviando `{ "nome": "...", "email": "...", "senha": "..." }`. Retorna HTTP 401 em caso de falha de validação do nome, e-mail ou senha.
 - **Banco de Dados:** Supabase PostgreSQL (via Supabase Pooler IPv4/IPv6).
-- **Frontend:** HTML5, CSS3, JavaScript (ES6+) e Chart.js.
+- **Frontend:** HTML5, CSS3, JavaScript (ES6+) e Chart.js. Logotipo do sistema servido a partir da pasta `img/` (`img/Lume.png` e `img/LumeEscuro.png`).
 - **Hospedagem Frontend:** GitHub Pages (publicado automaticamente via GitHub Actions workflow `.github/workflows/static.yml` a partir do diretório `src/main/resources/static`).

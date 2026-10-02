@@ -25,7 +25,7 @@ public class AuthIntegrationTest {
     @Test
     @DisplayName("Login Funcionário Anderson Correto - ACESSO PERMITIDO")
     void loginFuncionarioAndersonCorreto() {
-        LoginRequest request = new LoginRequest("anderson.func@empresa.com", "etec2026@DS", null);
+        LoginRequest request = new LoginRequest("anderson.func@empresa.com", "etec2026@DS", "Anderson");
         ResponseEntity<?> response = authController.login(request);
 
         assertEquals(HttpStatus.OK, response.getStatusCode());
@@ -42,7 +42,7 @@ public class AuthIntegrationTest {
     @Test
     @DisplayName("Login Gerente Robson Correto - ACESSO PERMITIDO")
     void loginGerenteRobsonCorreto() {
-        LoginRequest request = new LoginRequest("robson.grt@empresa.com", "etec2026@DS", null);
+        LoginRequest request = new LoginRequest("robson.grt@empresa.com", "etec2026@DS", "Robson");
         ResponseEntity<?> response = authController.login(request);
 
         assertEquals(HttpStatus.OK, response.getStatusCode());
@@ -59,7 +59,7 @@ public class AuthIntegrationTest {
     @Test
     @DisplayName("Login Funcionária Isabella Correto - ACESSO PERMITIDO")
     void loginFuncionarioIsabellaCorreto() {
-        LoginRequest request = new LoginRequest("isabella.func@empresa.com", "etec2026@DS", null);
+        LoginRequest request = new LoginRequest("isabella.func@empresa.com", "etec2026@DS", "Isabella");
         ResponseEntity<?> response = authController.login(request);
 
         assertEquals(HttpStatus.OK, response.getStatusCode());
@@ -73,7 +73,7 @@ public class AuthIntegrationTest {
     @Test
     @DisplayName("Login Gerente Manuella Correto - ACESSO PERMITIDO")
     void loginGerenteManuellaCorreto() {
-        LoginRequest request = new LoginRequest("manuella.grt@empresa.com", "etec2026@DS", null);
+        LoginRequest request = new LoginRequest("manuella.grt@empresa.com", "etec2026@DS", "Manuella");
         ResponseEntity<?> response = authController.login(request);
 
         assertEquals(HttpStatus.OK, response.getStatusCode());
@@ -85,9 +85,27 @@ public class AuthIntegrationTest {
     }
 
     @Test
+    @DisplayName("Nome Incorreto - ACESSO NEGADO")
+    void loginNomeIncorreto() {
+        LoginRequest request = new LoginRequest("anderson.func@empresa.com", "etec2026@DS", "NomeIncorreto");
+        ResponseEntity<?> response = authController.login(request);
+
+        assertEquals(HttpStatus.UNAUTHORIZED, response.getStatusCode());
+    }
+
+    @Test
+    @DisplayName("Nome Vazio - ACESSO NEGADO")
+    void loginNomeVazio() {
+        LoginRequest request = new LoginRequest("anderson.func@empresa.com", "etec2026@DS", "");
+        ResponseEntity<?> response = authController.login(request);
+
+        assertEquals(HttpStatus.UNAUTHORIZED, response.getStatusCode());
+    }
+
+    @Test
     @DisplayName("Teste 1 - Senha incorreta do funcionário - ACESSO NEGADO")
     void teste1SenhaIncorretaFuncionario() {
-        LoginRequest request = new LoginRequest("anderson.func@empresa.com", "senhaIncorreta", null);
+        LoginRequest request = new LoginRequest("anderson.func@empresa.com", "senhaIncorreta", "Anderson");
         ResponseEntity<?> response = authController.login(request);
 
         assertEquals(HttpStatus.UNAUTHORIZED, response.getStatusCode());
@@ -96,7 +114,7 @@ public class AuthIntegrationTest {
     @Test
     @DisplayName("Teste 2 - Senha incorreta do gerente - ACESSO NEGADO")
     void teste2SenhaIncorretaGerente() {
-        LoginRequest request = new LoginRequest("robson.grt@empresa.com", "senhaIncorreta", null);
+        LoginRequest request = new LoginRequest("robson.grt@empresa.com", "senhaIncorreta", "Robson");
         ResponseEntity<?> response = authController.login(request);
 
         assertEquals(HttpStatus.UNAUTHORIZED, response.getStatusCode());
@@ -105,7 +123,7 @@ public class AuthIntegrationTest {
     @Test
     @DisplayName("Teste 3 - Email inexistente - ACESSO NEGADO")
     void teste3EmailInexistente() {
-        LoginRequest request = new LoginRequest("inexistente@empresa.com", "etec2026@DS", null);
+        LoginRequest request = new LoginRequest("inexistente@empresa.com", "etec2026@DS", "Anderson");
         ResponseEntity<?> response = authController.login(request);
 
         assertEquals(HttpStatus.UNAUTHORIZED, response.getStatusCode());
@@ -114,7 +132,7 @@ public class AuthIntegrationTest {
     @Test
     @DisplayName("Teste 4 - Email parcialmente incorreto - ACESSO NEGADO")
     void teste4EmailParcialmenteIncorreto() {
-        LoginRequest request = new LoginRequest("anderson.func@empresa.co", "etec2026@DS", null);
+        LoginRequest request = new LoginRequest("anderson.func@empresa.co", "etec2026@DS", "Anderson");
         ResponseEntity<?> response = authController.login(request);
 
         assertEquals(HttpStatus.UNAUTHORIZED, response.getStatusCode());
@@ -123,7 +141,7 @@ public class AuthIntegrationTest {
     @Test
     @DisplayName("Teste 5 - Email vazio - ACESSO NEGADO")
     void teste5EmailVazio() {
-        LoginRequest request = new LoginRequest("", "etec2026@DS", null);
+        LoginRequest request = new LoginRequest("", "etec2026@DS", "Anderson");
         ResponseEntity<?> response = authController.login(request);
 
         assertEquals(HttpStatus.UNAUTHORIZED, response.getStatusCode());
@@ -132,7 +150,7 @@ public class AuthIntegrationTest {
     @Test
     @DisplayName("Teste 6 - Senha vazia - ACESSO NEGADO")
     void teste6SenhaVazia() {
-        LoginRequest request = new LoginRequest("anderson.func@empresa.com", "", null);
+        LoginRequest request = new LoginRequest("anderson.func@empresa.com", "", "Anderson");
         ResponseEntity<?> response = authController.login(request);
 
         assertEquals(HttpStatus.UNAUTHORIZED, response.getStatusCode());
@@ -141,7 +159,7 @@ public class AuthIntegrationTest {
     @Test
     @DisplayName("Teste 7 - Ambos vazios - ACESSO NEGADO")
     void teste7AmbosVazios() {
-        LoginRequest request = new LoginRequest("", "", null);
+        LoginRequest request = new LoginRequest("", "", "");
         ResponseEntity<?> response = authController.login(request);
 
         assertEquals(HttpStatus.UNAUTHORIZED, response.getStatusCode());
@@ -150,7 +168,7 @@ public class AuthIntegrationTest {
     @Test
     @DisplayName("Teste 8 - Alterar um caractere da senha - ACESSO NEGADO")
     void teste8AlterarUmCaractereSenha() {
-        LoginRequest request = new LoginRequest("anderson.func@empresa.com", "etec2026@Ds", null);
+        LoginRequest request = new LoginRequest("anderson.func@empresa.com", "etec2026@Ds", "Anderson");
         ResponseEntity<?> response = authController.login(request);
 
         assertEquals(HttpStatus.UNAUTHORIZED, response.getStatusCode());
@@ -159,7 +177,7 @@ public class AuthIntegrationTest {
     @Test
     @DisplayName("Teste 9 - Trocar usuário e manter senha - ACESSO NEGADO")
     void teste9TrocarUsuarioManterSenha() {
-        LoginRequest request = new LoginRequest("email.inexistente@empresa.com", "etec2026@DS", null);
+        LoginRequest request = new LoginRequest("email.inexistente@empresa.com", "etec2026@DS", "Anderson");
         ResponseEntity<?> response = authController.login(request);
 
         assertEquals(HttpStatus.UNAUTHORIZED, response.getStatusCode());
@@ -168,8 +186,8 @@ public class AuthIntegrationTest {
     @Test
     @DisplayName("Verificar separação de usuários e permissões do objeto retornado")
     void testSeparacaoUsuariosEInformacoes() {
-        LoginResponse funcResp = authService.autenticar(new LoginRequest("anderson.func@empresa.com", "etec2026@DS", null));
-        LoginResponse grtResp = authService.autenticar(new LoginRequest("robson.grt@empresa.com", "etec2026@DS", null));
+        LoginResponse funcResp = authService.autenticar(new LoginRequest("anderson.func@empresa.com", "etec2026@DS", "Anderson"));
+        LoginResponse grtResp = authService.autenticar(new LoginRequest("robson.grt@empresa.com", "etec2026@DS", "Robson"));
 
         assertEquals("funcionario", funcResp.getCargo());
         assertEquals("gerente", grtResp.getCargo());

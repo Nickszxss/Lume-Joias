@@ -30,7 +30,7 @@ Esta especificação técnica detalha a implementação do **Sistema de Gerencia
 
 | ID | Requisito (Documento Original) | Componente Técnico | Arquivo / Endpoint | Status |
 |----|----------------------------------|-------------------|-------------------|--------|
-| **RF-01** | Login de usuários | Validação de login no backend Java | `AuthController.java` — `/api/auth/login` | Concluído |
+| **RF-01** | Login de usuários | Validação de login no backend Java enviando Nome, E-mail e Senha | `AuthController.java` — `/api/auth/login` | Concluído |
 | **RF-02** | Dois tipos de usuário: gerente e funcionário | Enum/Cargo no PostgreSQL (`cargo`) | `Usuario.java` / `AuthService.java` | Concluído |
 | **RF-03** | Gerente acessa 5 filiais | Regra de autorização (`gerente`) + consulta sem filtro | `DashboardService.java`, `FilialController.java` | Concluído |
 | **RF-04** | Funcionário acessa só sua filial | Filtro por `filial_id` nas consultas SQL | `EstoqueService.java` | Concluído |

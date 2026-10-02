@@ -41,10 +41,10 @@ public class AuthService {
 
         boolean senhaValida = false;
         // Tenta BCrypt primeiro; fallback para texto plano se não for hash BCrypt
-        if (usuario.getSenha().startsWith("$2a$") || usuario.getSenha().startsWith("$2b$") || usuario.getSenha().startsWith("$2y$")) {
+        if (usuario.getSenha() != null && (usuario.getSenha().startsWith("$2a$") || usuario.getSenha().startsWith("$2b$") || usuario.getSenha().startsWith("$2y$"))) {
             senhaValida = passwordEncoder.matches(request.getSenha(), usuario.getSenha());
         } else {
-            senhaValida = usuario.getSenha().equals(request.getSenha());
+            senhaValida = usuario.getSenha() != null && usuario.getSenha().equals(request.getSenha());
         }
 
         if (!senhaValida) {

@@ -53,24 +53,25 @@ let mockMovimentacoes = [
 
 // Wrapper único de fetch: centraliza headers, tratamento de erro, JSON e fallback local para GitHub Pages.
 async function apiRequest(path, options = {}) {
+  let res;
   try {
-    const res = await fetch(`${API_BASE_URL}${path}`, {
+    res = await fetch(`${API_BASE_URL}${path}`, {
       headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
       ...options
     });
-
-    if (!res.ok) {
-      let msg = `Erro ${res.status}`;
-      try { const body = await res.json(); msg = body.message || msg; } catch (_) {}
-      throw new Error(msg);
-    }
-
-    if (res.status === 204) return null;
-    return await res.json();
   } catch (err) {
-    // Caso esteja rodando sem o backend Java ativo (ex: GitHub Pages puro), executa fallback funcional
+    // Caso esteja rodando sem o backend Java ativo (ex: GitHub Pages puro sem servidor), executa fallback funcional
     return resolverMockLocal(path, options);
   }
+
+  if (!res.ok) {
+    let msg = `Erro ${res.status}`;
+    try { const body = await res.json(); msg = body.message || msg; } catch (_) {}
+    throw new Error(msg);
+  }
+
+  if (res.status === 204) return null;
+  return await res.json();
 }
 
 function resolverMockLocal(path, options) {

@@ -756,45 +756,198 @@ tr:hover td {
 }
 
 @media (max-width:700px) {
-  aside {
-    width:100%;
-    height:auto;
-    position:relative;
-    padding:16px;
-  }
-
-  main {
-    margin-left:0;
-    padding:20px;
-  }
-
   #app.active {
     display:block;
   }
 
+  aside {
+    width:100%;
+    height:auto;
+    position:sticky;
+    top:0;
+    z-index:200;
+    padding:10px 14px 6px;
+    background-color:var(--bg-sidebar);
+    box-shadow:var(--shadow);
+    border-right:none;
+    border-bottom:1px solid var(--border);
+    display:grid;
+    grid-template-columns:auto 1fr auto;
+    grid-template-rows:auto auto;
+    align-items:center;
+    column-gap:8px;
+    row-gap:8px;
+  }
+
+  .logo {
+    grid-column:1;
+    grid-row:1;
+    border-bottom:none;
+    padding:0;
+    justify-content:flex-start;
+  }
+
+  .brand-icon img {
+    margin-bottom:0;
+    height:28px;
+    width:auto;
+  }
+
+  .theme-toggle-container {
+    grid-column:2;
+    grid-row:1;
+    border-top:none;
+    padding:0;
+    justify-self:end;
+  }
+
+  .btn-theme-toggle {
+    padding:5px 10px;
+    font-size:.75rem;
+    gap:6px;
+  }
+
+  .user-box {
+    grid-column:3;
+    grid-row:1;
+    border-top:none;
+    padding-top:0;
+    gap:8px;
+    justify-self:end;
+  }
+
+  .avatar {
+    width:28px;
+    height:28px;
+    font-size:.75rem;
+  }
+
+  .user-info {
+    display:none;
+  }
+
   #menu {
+    grid-column:1 / -1;
+    grid-row:2;
+    margin-top:0;
     flex-direction:row;
-    flex-wrap:wrap;
+    flex-wrap:nowrap;
+    overflow-x:auto;
+    -webkit-overflow-scrolling:touch;
+    gap:6px;
+    padding:2px 0 6px 0;
+    scrollbar-width:none;
+  }
+
+  #menu::-webkit-scrollbar {
+    display:none;
   }
 
   #menu a {
-    flex:1;
-    min-width:130px;
+    flex:0 0 auto;
+    white-space:nowrap;
+    padding:6px 12px;
+    font-size:.78125rem;
+    border-radius:20px;
+    border:1px solid var(--border);
+    background-color:var(--input-bg);
+  }
+
+  #menu a.active {
+    border-color:var(--rose-primary);
+  }
+
+  #menu a .icon {
+    width:15px;
+  }
+
+  main {
+    margin-left:0;
+    padding:16px 12px;
   }
 
   .page-header {
     flex-direction:column;
     align-items:flex-start;
-    gap:16px;
+    gap:12px;
+    margin-bottom:16px;
+  }
+
+  .tab-filial {
+    width:100%;
+    overflow-x:auto;
+    white-space:nowrap;
+    display:flex;
+  }
+
+  .tab-filial button {
+    flex:1;
+    padding:6px 8px;
+    font-size:.6875rem;
+    text-align:center;
   }
 
   .toolbar {
     flex-direction:column;
+    gap:8px;
+    margin-bottom:16px;
   }
 
   .toolbar input,
   .toolbar select {
     max-width:none;
+    width:100%;
+  }
+
+  .grid-2 {
+    grid-template-columns:1fr;
+    gap:16px;
+  }
+
+  .chart-box {
+    height:220px;
+  }
+
+  .modal {
+    padding:20px 16px;
+    max-width:92%;
+    margin:0 16px;
+  }
+
+  .card {
+    position:relative;
+    overflow-x:auto;
+    -webkit-overflow-scrolling:touch;
+    padding:16px;
+  }
+
+  .card:has(table)::before {
+    content:"← Deslize para ver mais →";
+    display:block;
+    text-align:right;
+    font-size:.6875rem;
+    font-weight:600;
+    color:var(--rose-primary);
+    margin-bottom:8px;
+    opacity:.9;
+  }
+
+  table {
+    min-width:640px;
+  }
+
+  .card::-webkit-scrollbar {
+    height:5px;
+  }
+
+  .card::-webkit-scrollbar-track {
+    background:var(--input-bg);
+    border-radius:3px;
+  }
+
+  .card::-webkit-scrollbar-thumb {
+    background:var(--rose-primary);
+    border-radius:3px;
   }
 }
 
@@ -805,13 +958,5 @@ tr:hover td {
 
   .grid-kpi {
     grid-template-columns:1fr;
-  }
-
-  .card {
-    overflow-x:auto;
-  }
-
-  table {
-    min-width:700px;
   }
 }

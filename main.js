@@ -1,7 +1,6 @@
 /* =====================================================================
    SGE — Camada de Front-end (visualização + interação)
-   Toda a lógica de negócio e persistência fica no backend Java + Supabase.
-   Este arquivo apenas consome a API e atualiza a tela.
+   A lógica de negócio e persistência se comunica diretamente com o Supabase.
    ===================================================================== */
 
 // ---------- CONFIGURAÇÃO DA API E BASE DADOS DEMO/STATIC ----------
@@ -291,6 +290,9 @@ const api = {
   },
 
   listarEstoque: async (filialId) => {
+    if (usuario && usuario.tipo === 'funcionario' && usuario.filial_id) {
+      filialId = usuario.filial_id;
+    }
     const client = getSupabaseClient();
     if (client) {
       let query = client.from('estoques').select('*');
@@ -302,6 +304,9 @@ const api = {
   },
 
   ajustarEstoque: async (dados) => {
+    if (usuario && usuario.tipo === 'funcionario' && usuario.filial_id && dados.filialId != usuario.filial_id) {
+      throw new Error('Acesso negado: Funcionário só pode alterar o estoque da sua própria filial.');
+    }
     const client = getSupabaseClient();
     if (client) {
       // Buscar registro atual de estoque
@@ -341,7 +346,7 @@ const api = {
         quantidade: dados.quantidade,
         quantidade_anterior: anterior,
         quantidade_nova: novaQtd,
-        usuario: dados.usuario || (usuario ? usuario.nome : 'Usuário'),
+        usuario_id: usuario ? usuario.id : null,
         motivo: dados.motivo || 'Ajuste manual',
         created_at: new Date().toISOString()
       }]);
@@ -354,11 +359,17 @@ const api = {
   listarTransferencias: async () => {
     const client = getSupabaseClient();
     if (client) {
-      const { data, error } = await client.from('transferencias').select('*').order('id', { ascending: false });
+      let query = client.from('transferencias').select('*').order('id', { ascending: false });
+      const { data, error } = await query;
       if (!error && data) {
         const { data: prods } = await client.from('produtos').select('id, nome');
         const { data: fils } = await client.from('filiais').select('id, nome');
-        return data.map(t => ({
+        const { data: usrs } = await client.from('usuarios').select('id, nome');
+        let listT = data;
+        if (usuario && usuario.tipo === 'funcionario' && usuario.filial_id) {
+          listT = listT.filter(t => (t.origem_id == usuario.filial_id || t.origem_filial_id == usuario.filial_id || t.destino_id == usuario.filial_id || t.destino_filial_id == usuario.filial_id));
+        }
+        return listT.map(t => ({
           id: t.id,
           produto_id: t.produto_id,
           produtoNome: prods?.find(p => p.id === t.produto_id)?.nome || 'Produto',
@@ -367,7 +378,7 @@ const api = {
           destino_id: t.destino_id || t.destino_filial_id,
           destinoNome: fils?.find(f => f.id === (t.destino_id || t.destino_filial_id))?.nome || 'Filial Destino',
           quantidade: t.quantidade,
-          solicitante: t.solicitante || t.usuario || 'Solicitante',
+          solicitante: t.solicitante || usrs?.find(u => u.id === t.usuario_id)?.nome || (usuario ? usuario.nome : 'Solicitante'),
           data: t.created_at ? new Date(t.created_at).toLocaleDateString('pt-BR') : new Date().toLocaleDateString('pt-BR'),
           status: t.status || 'solicitada'
         }));
@@ -377,14 +388,37 @@ const api = {
   },
 
   criarTransferencia: async (dados) => {
+    if (usuario && usuario.tipo === 'funcionario' && usuario.filial_id && dados.origemId != usuario.filial_id) {
+      throw new Error('Acesso negado: Funcionário só pode solicitar transferência tendo sua filial como origem.');
+    }
+    if (!dados.quantidade || dados.quantidade <= 0) {
+      throw new Error('Informe uma quantidade válida para a transferência.');
+    }
+    if (dados.origemId === dados.destinoId) {
+      throw new Error('Filial de Origem e Destino devem ser diferentes.');
+    }
+
     const client = getSupabaseClient();
     if (client) {
+      // 1. Validar produto e estoque de origem
+      const { data: origEst } = await client
+        .from('estoques')
+        .select('*')
+        .eq('produto_id', dados.produtoId)
+        .eq('filial_id', dados.origemId)
+        .single();
+
+      const estoqueDisponivel = origEst ? origEst.quantidade : 0;
+      if (estoqueDisponivel < dados.quantidade) {
+        throw new Error(`Estoque insuficiente na filial de origem (disponível: ${estoqueDisponivel}).`);
+      }
+
       const payload = {
         produto_id: dados.produtoId,
         origem_id: dados.origemId,
         destino_id: dados.destinoId,
         quantidade: dados.quantidade,
-        solicitante: dados.solicitante || (usuario ? usuario.nome : 'Solicitante'),
+        usuario_id: usuario ? usuario.id : null,
         status: 'solicitada',
         created_at: new Date().toISOString()
       };
@@ -396,10 +430,12 @@ const api = {
           origem_id: data.origem_id,
           destino_id: data.destino_id,
           quantidade: data.quantidade,
-          solicitante: data.solicitante,
+          solicitante: usuario ? usuario.nome : 'Solicitante',
           data: new Date().toLocaleDateString('pt-BR'),
           status: 'solicitada'
         };
+      } else if (error) {
+        throw new Error(error.message || 'Erro ao criar transferência no Supabase.');
       }
     }
     return apiRequest('/transferencias', { method: 'POST', body: JSON.stringify(dados) });
@@ -409,28 +445,91 @@ const api = {
     const client = getSupabaseClient();
     if (client) {
       const { data: transf } = await client.from('transferencias').select('*').eq('id', id).single();
-      if (transf) {
-        await client.from('transferencias').update({ status: 'concluida' }).eq('id', id);
-
-        // Deduzir da origem e adicionar no destino
-        const origId = transf.origem_id || transf.origem_filial_id;
-        const destId = transf.destino_id || transf.destino_filial_id;
-
-        if (origId && destId) {
-          const { data: origEst } = await client.from('estoques').select('*').eq('produto_id', transf.produto_id).eq('filial_id', origId).single();
-          const { data: destEst } = await client.from('estoques').select('*').eq('produto_id', transf.produto_id).eq('filial_id', destId).single();
-
-          if (origEst) {
-            const novOrig = Math.max(0, origEst.quantidade - transf.quantidade);
-            await client.from('estoques').update({ quantidade: novOrig }).eq('id', origEst.id);
-          }
-          if (destEst) {
-            const novDest = destEst.quantidade + transf.quantidade;
-            await client.from('estoques').update({ quantidade: novDest }).eq('id', destEst.id);
-          }
-        }
-        return { ...transf, status: 'concluida' };
+      if (!transf) {
+        throw new Error('Transferência não encontrada.');
       }
+      if (transf.status === 'concluida') {
+        throw new Error('Esta transferência já foi concluída anteriormente.');
+      }
+
+      const origId = transf.origem_id || transf.origem_filial_id;
+      const destId = transf.destino_id || transf.destino_filial_id;
+
+      // Buscar estoques de origem e destino
+      const { data: origEst } = await client.from('estoques').select('*').eq('produto_id', transf.produto_id).eq('filial_id', origId).single();
+      const { data: destEst } = await client.from('estoques').select('*').eq('produto_id', transf.produto_id).eq('filial_id', destId).single();
+
+      const origQtdAnt = origEst ? origEst.quantidade : 0;
+      if (origQtdAnt < transf.quantidade) {
+        throw new Error(`Estoque insuficiente na filial de origem para concluir a transferência (disponível: ${origQtdAnt}).`);
+      }
+
+      const novOrig = origQtdAnt - transf.quantidade;
+      const destQtdAnt = destEst ? destEst.quantidade : 0;
+      const novDest = destQtdAnt + transf.quantidade;
+
+      // Buscar dados do produto para recalcular status
+      const { data: prd } = await client.from('produtos').select('*').eq('id', transf.produto_id).single();
+      const minQtd = prd ? (prd.qtd_minima || 0) : 0;
+
+      const stOrig = novOrig === 0 ? 'zerado' : (novOrig <= minQtd ? 'baixo' : 'suficiente');
+      const stDest = novDest === 0 ? 'zerado' : (novDest <= minQtd ? 'baixo' : 'suficiente');
+
+      // Atualização atômica do status da transferência para 'concluida'
+      const { error: updateTransfErr } = await client
+        .from('transferencias')
+        .update({ status: 'concluida' })
+        .eq('id', id)
+        .neq('status', 'concluida');
+
+      if (updateTransfErr) {
+        throw new Error('Operação já concluída ou inválida.');
+      }
+
+      // Atualizar estoque de origem
+      if (origEst) {
+        await client.from('estoques').update({ quantidade: novOrig, status: stOrig, updated_at: new Date().toISOString() }).eq('id', origEst.id);
+      } else {
+        await client.from('estoques').insert([{ produto_id: transf.produto_id, filial_id: origId, quantidade: novOrig, status: stOrig }]);
+      }
+
+      // Atualizar estoque de destino
+      if (destEst) {
+        await client.from('estoques').update({ quantidade: novDest, status: stDest, updated_at: new Date().toISOString() }).eq('id', destEst.id);
+      } else {
+        await client.from('estoques').insert([{ produto_id: transf.produto_id, filial_id: destId, quantidade: novDest, status: stDest }]);
+      }
+
+      // Registrar 2 movimentações no histórico: 1 saída na origem, 1 entrada no destino
+      const dataHora = new Date().toISOString();
+      const usrId = usuario ? usuario.id : (transf.usuario_id || null);
+
+      await client.from('movimentacoes').insert([
+        {
+          produto_id: transf.produto_id,
+          filial_id: origId,
+          tipo: 'saida',
+          quantidade: transf.quantidade,
+          quantidade_anterior: origQtdAnt,
+          quantidade_nova: novOrig,
+          usuario_id: usrId,
+          motivo: `Transferência #${transf.id} para ${nomeFilial(destId)}`,
+          created_at: dataHora
+        },
+        {
+          produto_id: transf.produto_id,
+          filial_id: destId,
+          tipo: 'entrada',
+          quantidade: transf.quantidade,
+          quantidade_anterior: destQtdAnt,
+          quantidade_nova: novDest,
+          usuario_id: usrId,
+          motivo: `Transferência #${transf.id} vinda de ${nomeFilial(origId)}`,
+          created_at: dataHora
+        }
+      ]);
+
+      return { ...transf, status: 'concluida' };
     }
     return apiRequest(`/transferencias/${id}/concluir`, { method: 'PATCH' });
   },
@@ -488,9 +587,13 @@ const api = {
   listarAlertas: async () => {
     const client = getSupabaseClient();
     if (client) {
-      const { data: listE } = await client.from('estoques').select('*');
+      let { data: listE } = await client.from('estoques').select('*');
       const { data: listP } = await client.from('produtos').select('*');
       const { data: listF } = await client.from('filiais').select('*');
+
+      if (listE && usuario && usuario.tipo === 'funcionario' && usuario.filial_id) {
+        listE = listE.filter(e => e.filial_id == usuario.filial_id);
+      }
 
       if (listE && listP && listF) {
         const alertas = listE.filter(e => e.status === 'baixo' || e.status === 'zerado').map(e => {
@@ -515,6 +618,9 @@ const api = {
   },
 
   listarHistorico: async (filtros = {}) => {
+    if (usuario && usuario.tipo === 'funcionario' && usuario.filial_id) {
+      filtros.filialId = usuario.filial_id;
+    }
     const client = getSupabaseClient();
     if (client) {
       let query = client.from('movimentacoes').select('*').order('id', { ascending: false });
@@ -545,6 +651,9 @@ const api = {
   },
 
   resumoDashboard: async (filialId) => {
+    if (usuario && usuario.tipo === 'funcionario' && usuario.filial_id) {
+      filialId = usuario.filial_id;
+    }
     const client = getSupabaseClient();
     if (client) {
       const { data: listE } = await client.from('estoques').select('*');
@@ -553,12 +662,17 @@ const api = {
       const { data: listT } = await client.from('transferencias').select('*');
 
       if (listE && listP && listF) {
-        const filteredE = filialId ? listE.filter(e => e.filial_id == filialId) : listE;
+        const targetFilial = filialId || (usuario && usuario.tipo === 'funcionario' ? usuario.filial_id : null);
+        const filteredE = targetFilial ? listE.filter(e => e.filial_id == targetFilial) : listE;
         const totalItens = filteredE.reduce((sum, e) => sum + e.quantidade, 0);
         const totalBaixo = filteredE.filter(e => e.status === 'baixo').length;
         const totalZerado = filteredE.filter(e => e.status === 'zerado').length;
 
-        const estoquePorFilial = listF.map(f => ({
+        const visFiliais = (usuario && usuario.tipo === 'funcionario' && usuario.filial_id)
+          ? listF.filter(f => f.id == usuario.filial_id)
+          : listF;
+
+        const estoquePorFilial = visFiliais.map(f => ({
           nome: f.nome,
           total: listE.filter(e => e.filial_id === f.id).reduce((s, e) => s + e.quantidade, 0)
         }));
@@ -570,6 +684,10 @@ const api = {
           quantidadeMinima: listP.find(p => p.id === e.produto_id)?.qtd_minima || 0
         }));
 
+        const filteredT = (usuario && usuario.tipo === 'funcionario' && usuario.filial_id)
+          ? (listT ? listT.filter(t => (t.origem_id == usuario.filial_id || t.destino_id == usuario.filial_id) && (t.status === 'solicitada' || t.status === 'pendente')) : [])
+          : (listT ? listT.filter(t => t.status === 'solicitada' || t.status === 'pendente') : []);
+
         return {
           estoques: filteredE,
           produtos: listP,
@@ -577,7 +695,7 @@ const api = {
           totalProdutos: listP.length,
           totalBaixo,
           totalZerado,
-          totalTransferenciasPendentes: listT ? listT.filter(t => t.status === 'solicitada' || t.status === 'pendente').length : 0,
+          totalTransferenciasPendentes: filteredT.length,
           estoquePorFilial,
           movimentacoesSemana: { labels: ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'], entradas: [12, 19, 3, 5, 2, 3, 10], saidas: [2, 3, 20, 5, 1, 4, 8] },
           alertas
@@ -865,7 +983,8 @@ function montarFiltros(){
 
   const histF = $('hist-filial');
   if (histF) {
-    histF.innerHTML = '<option value="">Todas as filiais</option>' +
+    const showAllOpt = usuario && usuario.tipo === 'gerente';
+    histF.innerHTML = (showAllOpt ? '<option value="">Todas as filiais</option>' : '') +
       vis.map(f=>`<option value="${f.id}">${f.nome}</option>`).join('');
   }
 }
@@ -1000,7 +1119,11 @@ function pintarProdutos(){
   produtos
     .filter(p => p.nome.toLowerCase().includes(busca) || p.sku.toLowerCase().includes(busca))
     .forEach(p => {
-      estoques.filter(e => e.produto_id === p.id).forEach(e => {
+      let filteredEstoques = estoques.filter(e => e.produto_id === p.id);
+      if (usuario && usuario.tipo === 'funcionario' && usuario.filial_id) {
+        filteredEstoques = filteredEstoques.filter(e => e.filial_id == usuario.filial_id);
+      }
+      filteredEstoques.forEach(e => {
         const status = e.status ?? statusEstoque(e.quantidade, p.qtd_minima);
         if(st && status !== st) return;
         html += `
@@ -1083,6 +1206,10 @@ function pintarEstoque(){
 }
 
 function abrirModalAjuste(pid, fid){
+  if (usuario && usuario.tipo === 'funcionario' && usuario.filial_id && fid != usuario.filial_id) {
+    toast('Acesso negado: Funcionário só pode alterar o estoque da sua própria filial.', true);
+    return;
+  }
   ajusteTarget = {pid, fid};
   const titulo = $('ajuste-titulo');
   if (titulo) titulo.textContent = `Ajustar: ${nomeProduto(pid)} (${nomeFilial(fid)})`;
@@ -1134,7 +1261,9 @@ function pintarTransferencias(){
 
   tb.innerHTML = transferencias.length === 0
     ? '<tr><td colspan="9" class="empty-state">Nenhuma transferência registrada.</td></tr>'
-    : transferencias.map(t => `
+    : transferencias.map(t => {
+      const pender = t.status === 'solicitada' || t.status === 'pendente';
+      return `
       <tr>
         <td>#${t.id}</td>
         <td><b>${t.produtoNome ?? nomeProduto(t.produto_id)}</b></td>
@@ -1144,9 +1273,9 @@ function pintarTransferencias(){
         <td>${t.solicitante}</td>
         <td>${t.data}</td>
         <td><span class="badge ${t.status==='concluida'?'ok':'info'}">${t.status}</span></td>
-        <td>${t.status==='pendente' ? `<button class="btn-sm btn-primary" onclick="concluirTransf(${t.id})">Concluir</button>` : '—'}</td>
+        <td>${pender ? `<button class="btn-sm btn-primary" onclick="concluirTransf(${t.id}, this)">Concluir</button>` : '—'}</td>
       </tr>
-    `).join('');
+    `}).join('');
 }
 
 async function abrirModalTransferencia(){
@@ -1162,7 +1291,15 @@ async function abrirModalTransferencia(){
   if (tp) tp.innerHTML = produtos.map(p=>`<option value="${p.id}">${p.nome}</option>`).join('');
 
   const to = $('t-origem');
-  if (to) to.innerHTML = FILIAIS.map(f=>`<option value="${f.id}">${f.nome}</option>`).join('');
+  if (to) {
+    to.innerHTML = FILIAIS.map(f=>`<option value="${f.id}">${f.nome}</option>`).join('');
+    if (usuario && usuario.tipo === 'funcionario' && usuario.filial_id) {
+      to.value = usuario.filial_id;
+      to.disabled = true;
+    } else {
+      to.disabled = false;
+    }
+  }
 
   const td = $('t-destino');
   if (td) td.innerHTML = FILIAIS.map(f=>`<option value="${f.id}">${f.nome}</option>`).join('');
@@ -1191,13 +1328,22 @@ async function salvarTransferencia(){
   }
 }
 
-async function concluirTransf(id){
+async function concluirTransf(id, btn){
+  if (btn) {
+    if (btn.disabled) return;
+    btn.disabled = true;
+    btn.textContent = 'Processando...';
+  }
   try {
     await api.concluirTransferencia(id);
-    toast('Transferência concluída!');
+    toast('Transferência concluída com sucesso!');
     renderTransferencias();
   } catch (err) {
     toast(err.message || 'Não foi possível concluir a transferência.', true);
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = 'Concluir';
+    }
   }
 }
 

@@ -5,7 +5,7 @@
 
 const SUPABASE_URL = 'https://pssrggtqmphcpqbdhjex.supabase.co';
 // Chave anon/pública fornecida para acesso client-side no frontend
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBzc3JnZ3RxbXBoY3BxYmRoamV4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDEyMzQ1NjcsImV4cCI6MjA1NjgxMDU2N30.placeholder_anon_key_until_configured';
+const SUPABASE_ANON_KEY = 'sb_publishable_p9yLQDR5lj0uT0F5NQ1_aw_6TyS9job';
 
 let supabaseClient = null;
 

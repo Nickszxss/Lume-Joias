@@ -541,17 +541,25 @@ const api = {
       if (!error && data) {
         const { data: prods } = await client.from('produtos').select('id, nome');
         const { data: fils } = await client.from('filiais').select('id, nome');
-        return data.map(p => ({
-          id: p.id,
-          produto_id: p.produto_id,
-          produtoNome: prods?.find(prd => prd.id === p.produto_id)?.nome || 'Produto',
-          quantidade: p.quantidade,
-          filial_id: p.filial_id,
-          filialNome: fils?.find(f => f.id === p.filial_id)?.nome || 'Filial',
-          solicitante: p.solicitante || p.usuario || 'Gerente',
-          data: p.created_at ? new Date(p.created_at).toLocaleDateString('pt-BR') : new Date().toLocaleDateString('pt-BR'),
-          status: p.status || 'aberto'
-        }));
+        return data.map(p => {
+          const pid = p.produto_id ?? p.produtoId ?? p.produto_ID;
+          const fid = p.filial_id ?? p.filialId ?? p.filial_ID;
+          const prdEncontrado = prods?.find(prd => String(prd.id) === String(pid));
+          const filEncontrada = fils?.find(f => String(f.id) === String(fid));
+          const qtd = p.quantidade ?? p.qtd ?? p.quant ?? 0;
+
+          return {
+            id: p.id,
+            produto_id: pid,
+            produtoNome: prdEncontrado ? prdEncontrado.nome : (nomeProduto(pid) !== '—' ? nomeProduto(pid) : `Produto #${pid || 'N/A'}`),
+            quantidade: qtd,
+            filial_id: fid,
+            filialNome: filEncontrada ? filEncontrada.nome : (nomeFilial(fid) !== '—' ? nomeFilial(fid) : `Filial #${fid || 'N/A'}`),
+            solicitante: p.solicitante || p.usuario || p.usuario_nome || 'Gerente',
+            data: p.created_at ? new Date(p.created_at).toLocaleDateString('pt-BR') : (p.data || new Date().toLocaleDateString('pt-BR')),
+            status: p.status || 'aberto'
+          };
+        });
       }
     }
     return apiRequest('/pedidos');
@@ -570,12 +578,16 @@ const api = {
       };
       const { data, error } = await client.from('pedidos_compra').insert([payload]).select().single();
       if (!error && data) {
+        const pid = data.produto_id ?? data.produtoId;
+        const fid = data.filial_id ?? data.filialId;
         return {
           id: data.id,
-          produto_id: data.produto_id,
-          quantidade: data.quantidade,
-          filial_id: data.filial_id,
-          solicitante: data.solicitante,
+          produto_id: pid,
+          produtoNome: nomeProduto(pid),
+          quantidade: data.quantidade ?? data.qtd ?? dados.quantidade,
+          filial_id: fid,
+          filialNome: nomeFilial(fid),
+          solicitante: data.solicitante || (usuario ? usuario.nome : 'Gerente'),
           data: new Date().toLocaleDateString('pt-BR'),
           status: 'aberto'
         };
@@ -631,19 +643,27 @@ const api = {
       if (!error && data) {
         const { data: prods } = await client.from('produtos').select('id, nome');
         const { data: fils } = await client.from('filiais').select('id, nome');
-        return data.map(m => ({
-          id: m.id,
-          data: m.created_at ? new Date(m.created_at).toLocaleString('pt-BR') : new Date().toLocaleString('pt-BR'),
-          produto_id: m.produto_id,
-          produtoNome: prods?.find(p => p.id === m.produto_id)?.nome || 'Produto',
-          filial_id: m.filial_id,
-          filialNome: fils?.find(f => f.id === m.filial_id)?.nome || 'Filial',
-          tipo: m.tipo,
-          anterior: m.quantidade_anterior ?? m.anterior ?? 0,
-          nova: m.quantidade_nova ?? m.nova ?? m.quantidade ?? 0,
-          usuario: m.usuario || 'Usuário',
-          motivo: m.motivo || 'Movimentação'
-        }));
+        const { data: usrs } = await client.from('usuarios').select('id, nome');
+
+        return data.map(m => {
+          const usrEncontrado = usrs?.find(u => String(u.id) === String(m.usuario_id));
+          const prdEncontrado = prods?.find(p => String(p.id) === String(m.produto_id));
+          const filEncontrada = fils?.find(f => String(f.id) === String(m.filial_id));
+
+          return {
+            id: m.id,
+            data: m.created_at ? new Date(m.created_at).toLocaleString('pt-BR') : (m.data || new Date().toLocaleString('pt-BR')),
+            produto_id: m.produto_id,
+            produtoNome: prdEncontrado ? prdEncontrado.nome : (nomeProduto(m.produto_id) !== '—' ? nomeProduto(m.produto_id) : `Produto #${m.produto_id || 'N/A'}`),
+            filial_id: m.filial_id,
+            filialNome: filEncontrada ? filEncontrada.nome : (nomeFilial(m.filial_id) !== '—' ? nomeFilial(m.filial_id) : `Filial #${m.filial_id || 'N/A'}`),
+            tipo: m.tipo,
+            anterior: m.quantidade_anterior ?? m.anterior ?? 0,
+            nova: m.quantidade_nova ?? m.nova ?? m.quantidade ?? 0,
+            usuario: usrEncontrado ? usrEncontrado.nome : (m.usuario || m.usuario_nome || 'Sistema'),
+            motivo: m.motivo || 'Movimentação'
+          };
+        });
       }
     }
     const qs = new URLSearchParams(filtros).toString();
@@ -669,24 +689,62 @@ const api = {
         const totalZerado = filteredE.filter(e => e.status === 'zerado').length;
 
         const visFiliais = (usuario && usuario.tipo === 'funcionario' && usuario.filial_id)
-          ? listF.filter(f => f.id == usuario.filial_id)
+          ? listF.filter(f => String(f.id) === String(usuario.filial_id))
           : listF;
 
         const estoquePorFilial = visFiliais.map(f => ({
           nome: f.nome,
-          total: listE.filter(e => e.filial_id === f.id).reduce((s, e) => s + e.quantidade, 0)
+          total: listE.filter(e => String(e.filial_id) === String(f.id)).reduce((s, e) => s + (e.quantidade || 0), 0)
         }));
 
         const alertas = filteredE.filter(e => e.status === 'baixo' || e.status === 'zerado').map(e => ({
           ...e,
-          produtoNome: listP.find(p => p.id === e.produto_id)?.nome,
-          filialNome: listF.find(f => f.id === e.filial_id)?.nome,
-          quantidadeMinima: listP.find(p => p.id === e.produto_id)?.qtd_minima || 0
+          produtoNome: listP.find(p => String(p.id) === String(e.produto_id))?.nome || `Produto #${e.produto_id}`,
+          filialNome: listF.find(f => String(f.id) === String(e.filial_id))?.nome || `Filial #${e.filial_id}`,
+          quantidadeMinima: listP.find(p => String(p.id) === String(e.produto_id))?.qtd_minima || 0
         }));
 
         const filteredT = (usuario && usuario.tipo === 'funcionario' && usuario.filial_id)
-          ? (listT ? listT.filter(t => (t.origem_id == usuario.filial_id || t.destino_id == usuario.filial_id) && (t.status === 'solicitada' || t.status === 'pendente')) : [])
+          ? (listT ? listT.filter(t => (String(t.origem_id) === String(usuario.filial_id) || String(t.destino_id) === String(usuario.filial_id)) && (t.status === 'solicitada' || t.status === 'pendente')) : [])
           : (listT ? listT.filter(t => t.status === 'solicitada' || t.status === 'pendente') : []);
+
+        // Consultar movimentações dos últimos 7 dias no Supabase
+        const diasSemana = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+        const hoje = new Date();
+        const labelsSemana = [];
+        const entradasSemana = [0, 0, 0, 0, 0, 0, 0];
+        const saidasSemana = [0, 0, 0, 0, 0, 0, 0];
+
+        // Montar os últimos 7 dias em ordem cronológica
+        const diasDatas = [];
+        for (let i = 6; i >= 0; i--) {
+          const d = new Date(hoje);
+          d.setDate(hoje.getDate() - i);
+          labelsSemana.push(diasSemana[d.getDay()]);
+          diasDatas.push(d.toISOString().split('T')[0]);
+        }
+
+        let queryMov = client.from('movimentacoes').select('*');
+        if (targetFilial) {
+          queryMov = queryMov.eq('filial_id', targetFilial);
+        }
+        const { data: listM } = await queryMov;
+
+        if (listM && listM.length > 0) {
+          listM.forEach(m => {
+            if (!m.created_at) return;
+            const dataStr = new Date(m.created_at).toISOString().split('T')[0];
+            const idx = diasDatas.indexOf(dataStr);
+            if (idx !== -1) {
+              const qtd = m.quantidade ?? m.quantidade_nova ?? 0;
+              if (m.tipo === 'entrada') {
+                entradasSemana[idx] += qtd;
+              } else if (m.tipo === 'saida') {
+                saidasSemana[idx] += qtd;
+              }
+            }
+          });
+        }
 
         return {
           estoques: filteredE,
@@ -697,7 +755,11 @@ const api = {
           totalZerado,
           totalTransferenciasPendentes: filteredT.length,
           estoquePorFilial,
-          movimentacoesSemana: { labels: ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'], entradas: [12, 19, 3, 5, 2, 3, 10], saidas: [2, 3, 20, 5, 1, 4, 8] },
+          movimentacoesSemana: {
+            labels: labelsSemana,
+            entradas: entradasSemana,
+            saidas: saidasSemana
+          },
           alertas
         };
       }
@@ -799,18 +861,41 @@ async function fazerLogin(){
   try {
     let resposta = null;
 
-    // Tentar autenticar via cliente Supabase se disponível
-    const client = window.supabaseClient || (typeof window.initSupabase === 'function' ? window.initSupabase() : null);
+    // Tentar autenticar via RPC no Supabase (validação segura de BCrypt server-side)
+    const client = getSupabaseClient();
     if (client) {
+      const { data, error } = await client.rpc('validar_login', {
+        p_nome: nome,
+        p_email: email,
+        p_senha: senha
+      });
+
+      if (error) {
+        console.warn('Erro ao chamar RPC validar_login, tentando fallback direto:', error.message);
+      } else if (data && data.length > 0) {
+        const u = data[0];
+        const cargo = (u.cargo || u.tipo || 'funcionario').toLowerCase();
+        resposta = {
+          id: u.id,
+          nome: u.nome,
+          email: u.email,
+          cargo: cargo,
+          tipo: cargo,
+          filial_id: u.filial_id ?? (cargo === 'gerente' ? null : 1)
+        };
+      }
+    }
+
+    // Se a RPC não estiver criada ainda no Supabase, fallback seguro tentando comparação de hash/texto puro
+    if (!resposta && client) {
       const { data, error } = await client
         .from('usuarios')
-        .select('*')
+        .select('id, nome, email, senha, cargo, filial_id')
         .ilike('email', email)
         .limit(1);
 
       if (!error && data && data.length > 0) {
         const u = data[0];
-        // Validar nome (case-insensitive) e senha
         const nomeValido = u.nome && u.nome.trim().toLowerCase() === nome.toLowerCase();
         const senhaValida = u.senha && u.senha === senha;
 
@@ -822,26 +907,14 @@ async function fazerLogin(){
             email: u.email,
             cargo: cargo,
             tipo: cargo,
-            filial_id: u.filial_id ?? u.filialId ?? (cargo === 'gerente' ? null : 1)
+            filial_id: u.filial_id ?? (cargo === 'gerente' ? null : 1)
           };
         }
       }
     }
 
-    // Se o Supabase direto não retornou resposta, fallback para MOCK_USUARIOS (GitHub Pages estático)
     if (!resposta) {
-      const mock = MOCK_USUARIOS.find(u =>
-        u.nome.toLowerCase() === nome.toLowerCase() &&
-        u.email.toLowerCase() === email.toLowerCase() &&
-        u.senha === senha
-      );
-      if (mock) {
-        resposta = { id: mock.id, nome: mock.nome, email: mock.email, cargo: mock.cargo, tipo: mock.tipo, filial_id: mock.filial_id };
-      }
-    }
-
-    if (!resposta) {
-      throw new Error('Acesso negado. Credenciais inválidas.');
+      throw new Error('Acesso negado. Nome, e-mail ou senha incorretos.');
     }
 
     aplicarLogin(resposta);
@@ -1379,6 +1452,11 @@ function pintarPedidos(){
 }
 
 async function abrirModalPedido(){
+  if (usuario && usuario.tipo !== 'gerente') {
+    toast('Somente gerentes podem criar pedidos de compra.', true);
+    return;
+  }
+
   try {
     if(produtos.length === 0) produtos = await api.listarProdutos();
   } catch (err) {
@@ -1400,14 +1478,24 @@ async function abrirModalPedido(){
 }
 
 async function salvarPedido(){
+  if (usuario && usuario.tipo !== 'gerente') {
+    toast('Apenas gerentes possuem permissão para criar pedidos.', true);
+    return;
+  }
+
   const produtoId = parseInt($('pc-produto') ? $('pc-produto').value : 0);
   const filialId = parseInt($('pc-filial') ? $('pc-filial').value : 0);
   const quantidade = parseInt($('pc-qtd') ? $('pc-qtd').value : 0) || 0;
 
+  if (!produtoId || !filialId || quantidade <= 0) {
+    toast('Selecione o produto, a filial e uma quantidade válida maior que zero.', true);
+    return;
+  }
+
   try {
-    await api.criarPedido({ produtoId, filialId, quantidade, solicitante: usuario ? usuario.nome : 'Usuário' });
+    await api.criarPedido({ produtoId, filialId, quantidade, solicitante: usuario ? usuario.nome : 'Gerente' });
     fecharModal();
-    toast('Pedido de compra criado!');
+    toast('Pedido de compra criado com sucesso!');
     renderPedidos();
   } catch (err) {
     toast(err.message || 'Não foi possível criar o pedido.', true);

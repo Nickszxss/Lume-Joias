@@ -37,14 +37,16 @@ Os usuários abaixo estão cadastrados na tabela `usuarios` do Supabase com senh
 | **Transferências** | Operacional | Validação de saldo de origem, atualização atômica e registro duplo no histórico. |
 | **Histórico / Audit** | Operacional | Exibição de movimentações vinculadas aos nomes reais de usuários e filiais. |
 | **Design / Tema** | Operacional | Alternância entre Modo Claro (rose `#9d3b5c`) e Escuro (`#c65b7e`) funcional. |
-| **Responsividade** | **PENDENTE (Tarefa 6)** | Suporte a breakpoint em 900px ativo, com pendências de ajuste fino para viewports <400px. |
+| **Responsividade** | **APROVADO** | Testado e homologado em 375px, 390px, 768px (portrait/landscape) e Desktop, nos temas Claro e Escuro sem rolagem indesejada na página. |
 
 ---
 
-## 4. Módulo de Dashboard Isolado por Perfil (Tarefa 5)
+## 4. Especificações de Responsividade e Breakpoints (Tarefa 6)
 
-- **Funcionário:** As consultas do Dashboard (`estoques`, `transferencias`, `movimentacoes`) enviam a cláusula `.eq('filial_id', usuario.filial_id)` diretamente para a API REST do Supabase. O gráfico "Estoque por Filial" exibe unicamente a barra da filial autorizada (ex: Filial Centro).
-- **Gerente:** Mantém visão consolidada de todas as 5 filiais com a barra comparativa e opção de alternar a visualização por filial específica.
+- **Breakpoints Principais:**
+  - `@media (max-width: 900px)`: Transição de sidebar para cabeçalho superior fixo com navegação em barra de pílulas horizontais (`#menu`) com rolagem suave.
+  - `@media (max-width: 500px)`: Modais ajustados com `max-height: 88vh; overflow-y: auto`, stack vertical de ações, e tabelas contidas em cards com `overflow-x: auto` e indicador visual `"← Deslize para ver mais →"`.
+- **Prevenção de Rolagem Indesejada:** Aplicado `body { overflow-x: hidden; }` garantindo estabilidade do layout em smartphones e tablets.
 
 ---
 

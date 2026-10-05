@@ -66,6 +66,7 @@ body {
   background-color:var(--bg-main);
   color:var(--text-primary);
   min-height:100vh;
+  overflow-x:hidden;
 }
 
 /* LOGIN */
@@ -680,7 +681,9 @@ tr:hover td {
 .modal {
   width:100%;
   max-width:460px;
-  padding:28px;
+  max-height:88vh;
+  overflow-y:auto;
+  padding:24px 20px;
   background-color:var(--bg-card);
   border:1px solid var(--border);
   border-radius:8px;
@@ -953,7 +956,44 @@ tr:hover td {
     padding:28px 20px;
   }
 
+  .login-card h1 {
+    font-size:1.85rem;
+  }
+
+  .page-header h2 {
+    font-size:1.25rem;
+  }
+
   .grid-kpi {
     grid-template-columns:1fr;
+    gap:10px;
+  }
+
+  .modal {
+    max-width:96%;
+    padding:18px 14px;
+    margin:10px auto;
+  }
+
+  .modal h3 {
+    font-size:1rem;
+    margin-bottom:14px;
+  }
+
+  .field {
+    margin-bottom:12px;
+  }
+
+  .field label {
+    font-size:.75rem;
+  }
+
+  .actions {
+    flex-direction:column;
+    gap:8px;
+  }
+
+  .actions .btn {
+    width:100%;
   }
 }

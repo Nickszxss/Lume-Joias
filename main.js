@@ -537,16 +537,24 @@ const api = {
   listarPedidos: async () => {
     const client = getSupabaseClient();
     if (client) {
-      const { data, error } = await client.from('pedidos_compra').select('*').order('id', { ascending: false });
-      if (!error && data) {
+      const { data: pedidosData, error: pErr } = await client.from('pedidos_compra').select('*').order('id', { ascending: false });
+      if (!pErr && pedidosData) {
+        const { data: itensData } = await client.from('itens_pedido_compra').select('*');
         const { data: prods } = await client.from('produtos').select('id, nome');
         const { data: fils } = await client.from('filiais').select('id, nome');
-        return data.map(p => {
-          const pid = p.produto_id ?? p.produtoId ?? p.produto_ID;
-          const fid = p.filial_id ?? p.filialId ?? p.filial_ID;
+        const { data: usrs } = await client.from('usuarios').select('id, nome');
+
+        return pedidosData.map(p => {
+          const itensDoPedido = itensData ? itensData.filter(i => String(i.pedido_id) === String(p.id)) : [];
+          const primeiroItem = itensDoPedido.length > 0 ? itensDoPedido[0] : null;
+
+          const pid = primeiroItem ? primeiroItem.produto_id : (p.produto_id ?? p.produtoId);
+          const fid = p.filial_id ?? p.filialId;
+          const qtd = primeiroItem ? primeiroItem.quantidade : (p.quantidade ?? p.qtd ?? 0);
+
           const prdEncontrado = prods?.find(prd => String(prd.id) === String(pid));
           const filEncontrada = fils?.find(f => String(f.id) === String(fid));
-          const qtd = p.quantidade ?? p.qtd ?? p.quant ?? 0;
+          const usrEncontrado = usrs?.find(u => String(u.id) === String(p.usuario_id));
 
           return {
             id: p.id,
@@ -555,9 +563,10 @@ const api = {
             quantidade: qtd,
             filial_id: fid,
             filialNome: filEncontrada ? filEncontrada.nome : (nomeFilial(fid) !== '—' ? nomeFilial(fid) : `Filial #${fid || 'N/A'}`),
-            solicitante: p.solicitante || p.usuario || p.usuario_nome || 'Gerente',
+            solicitante: usrEncontrado ? usrEncontrado.nome : (p.solicitante || p.usuario || 'Gerente'),
             data: p.created_at ? new Date(p.created_at).toLocaleDateString('pt-BR') : (p.data || new Date().toLocaleDateString('pt-BR')),
-            status: p.status || 'aberto'
+            status: p.status || 'aberto',
+            itens: itensDoPedido
           };
         });
       }
@@ -566,32 +575,63 @@ const api = {
   },
 
   criarPedido: async (dados) => {
+    if (usuario && usuario.tipo !== 'gerente') {
+      throw new Error('Apenas gerentes possuem permissão para criar pedidos.');
+    }
+    if (!dados.produtoId || !dados.filialId || !dados.quantidade || dados.quantidade <= 0) {
+      throw new Error('Informe um produto, filial e quantidade válida maior que zero.');
+    }
+
     const client = getSupabaseClient();
     if (client) {
-      const payload = {
-        produto_id: dados.produtoId,
+      // 1. Inserir o registro pai na tabela pedidos_compra
+      const payloadPedido = {
         filial_id: dados.filialId,
-        quantidade: dados.quantidade,
-        solicitante: dados.solicitante || (usuario ? usuario.nome : 'Gerente'),
+        usuario_id: usuario ? usuario.id : null,
         status: 'aberto',
         created_at: new Date().toISOString()
       };
-      const { data, error } = await client.from('pedidos_compra').insert([payload]).select().single();
-      if (!error && data) {
-        const pid = data.produto_id ?? data.produtoId;
-        const fid = data.filial_id ?? data.filialId;
-        return {
-          id: data.id,
-          produto_id: pid,
-          produtoNome: nomeProduto(pid),
-          quantidade: data.quantidade ?? data.qtd ?? dados.quantidade,
-          filial_id: fid,
-          filialNome: nomeFilial(fid),
-          solicitante: data.solicitante || (usuario ? usuario.nome : 'Gerente'),
-          data: new Date().toLocaleDateString('pt-BR'),
-          status: 'aberto'
-        };
+
+      const { data: pedido, error: pErr } = await client
+        .from('pedidos_compra')
+        .insert([payloadPedido])
+        .select()
+        .single();
+
+      if (pErr || !pedido) {
+        throw new Error(pErr?.message || 'Erro ao criar registro do pedido de compra.');
       }
+
+      // 2. Inserir os itens do pedido na tabela itens_pedido_compra
+      const payloadItem = {
+        pedido_id: pedido.id,
+        produto_id: dados.produtoId,
+        quantidade: dados.quantidade
+      };
+
+      const { data: item, error: iErr } = await client
+        .from('itens_pedido_compra')
+        .insert([payloadItem])
+        .select()
+        .single();
+
+      if (iErr) {
+        // Rollback: se a gravação do item falhar, excluir o pedido pai para evitar pedido incompleto
+        await client.from('pedidos_compra').delete().eq('id', pedido.id);
+        throw new Error(iErr.message || 'Erro ao gravar os itens do pedido de compra.');
+      }
+
+      return {
+        id: pedido.id,
+        produto_id: dados.produtoId,
+        produtoNome: nomeProduto(dados.produtoId),
+        quantidade: dados.quantidade,
+        filial_id: dados.filialId,
+        filialNome: nomeFilial(dados.filialId),
+        solicitante: usuario ? usuario.nome : 'Gerente',
+        data: new Date().toLocaleDateString('pt-BR'),
+        status: 'aberto'
+      };
     }
     return apiRequest('/pedidos', { method: 'POST', body: JSON.stringify(dados) });
   },
@@ -860,44 +900,59 @@ async function fazerLogin(){
 
   try {
     let resposta = null;
-
-    // Tentar autenticar via RPC no Supabase (validação segura de BCrypt server-side)
     const client = getSupabaseClient();
-    if (client) {
-      const { data, error } = await client.rpc('validar_login', {
-        p_nome: nome,
-        p_email: email,
-        p_senha: senha
-      });
 
-      if (error) {
-        console.warn('Erro ao chamar RPC validar_login, tentando fallback direto:', error.message);
-      } else if (data && data.length > 0) {
-        const u = data[0];
-        const cargo = (u.cargo || u.tipo || 'funcionario').toLowerCase();
-        resposta = {
-          id: u.id,
-          nome: u.nome,
-          email: u.email,
-          cargo: cargo,
-          tipo: cargo,
-          filial_id: u.filial_id ?? (cargo === 'gerente' ? null : 1)
-        };
+    // 1. Tentar autenticação via Supabase Auth nativo (signInWithPassword)
+    if (client && client.auth) {
+      try {
+        const { data: authData, error: authErr } = await client.auth.signInWithPassword({
+          email: email,
+          password: senha
+        });
+
+        if (!authErr && authData && authData.user) {
+          const { data: uData } = await client
+            .from('usuarios')
+            .select('id, nome, email, cargo, tipo, filial_id')
+            .ilike('email', email)
+            .single();
+
+          const u = uData || {};
+          const cargo = (u.cargo || u.tipo || authData.user.user_metadata?.cargo || 'funcionario').toLowerCase();
+          resposta = {
+            id: u.id || authData.user.id,
+            nome: u.nome || authData.user.user_metadata?.nome || nome,
+            email: email,
+            cargo: cargo,
+            tipo: cargo,
+            filial_id: u.filial_id ?? (cargo === 'gerente' ? null : 1),
+            access_token: authData.session?.access_token
+          };
+        }
+      } catch (authException) {
+        console.warn('Supabase Auth signInWithPassword indisponível, tentando validação de perfil:', authException);
       }
     }
 
-    // Se a RPC não estiver criada ainda no Supabase, fallback seguro tentando comparação de hash/texto puro
+    // 2. Se a autenticação no Supabase Auth não retornar sessão, consultar public.usuarios
+    // e validar a senha usando hash BCrypt (sem comparação de texto claro).
     if (!resposta && client) {
       const { data, error } = await client
         .from('usuarios')
-        .select('id, nome, email, senha, cargo, filial_id')
+        .select('id, nome, email, senha, cargo, tipo, filial_id')
         .ilike('email', email)
         .limit(1);
 
       if (!error && data && data.length > 0) {
         const u = data[0];
         const nomeValido = u.nome && u.nome.trim().toLowerCase() === nome.toLowerCase();
-        const senhaValida = u.senha && u.senha === senha;
+
+        // Validação segura de BCrypt via biblioteca dcodeIO/bcryptjs
+        let senhaValida = false;
+        const bcryptLib = (typeof dcodeIO !== 'undefined' && dcodeIO.bcrypt) ? dcodeIO.bcrypt : (typeof bcrypt !== 'undefined' ? bcrypt : null);
+        if (bcryptLib && typeof bcryptLib.compareSync === 'function') {
+          senhaValida = bcryptLib.compareSync(senha, u.senha);
+        }
 
         if (nomeValido && senhaValida) {
           const cargo = (u.cargo || u.tipo || 'funcionario').toLowerCase();
@@ -909,6 +964,15 @@ async function fazerLogin(){
             tipo: cargo,
             filial_id: u.filial_id ?? (cargo === 'gerente' ? null : 1)
           };
+
+          // Auto-provisionar no Supabase Auth para habilitar sessões JWT nativas futuramente
+          if (client.auth) {
+            client.auth.signUp({
+              email: email,
+              password: senha,
+              options: { data: { nome: u.nome, cargo: cargo, filial_id: u.filial_id } }
+            }).catch(() => {});
+          }
         }
       }
     }
@@ -985,7 +1049,11 @@ async function aplicarLogin(dadosUsuario){
   irPara('dashboard');
 }
 
-function sair(){
+async function sair(){
+  const client = getSupabaseClient();
+  if (client && client.auth) {
+    try { await client.auth.signOut(); } catch (_) {}
+  }
   usuario = null;
   localStorage.removeItem('lume_usuario');
   const appScreen = $('app');
@@ -995,7 +1063,36 @@ function sair(){
   if (loginScreen) loginScreen.style.display = 'flex';
 }
 
-function verificarSessaoAtiva(){
+async function verificarSessaoAtiva(){
+  const client = getSupabaseClient();
+  if (client && client.auth) {
+    try {
+      const { data } = await client.auth.getSession();
+      if (data && data.session && data.session.user) {
+        const authUser = data.session.user;
+        const { data: uData } = await client
+          .from('usuarios')
+          .select('id, nome, email, cargo, tipo, filial_id')
+          .ilike('email', authUser.email)
+          .single();
+
+        if (uData) {
+          const cargo = (uData.cargo || uData.tipo || 'funcionario').toLowerCase();
+          aplicarLogin({
+            id: uData.id,
+            nome: uData.nome,
+            email: uData.email,
+            cargo: cargo,
+            tipo: cargo,
+            filial_id: uData.filial_id ?? (cargo === 'gerente' ? null : 1),
+            access_token: data.session.access_token
+          });
+          return;
+        }
+      }
+    } catch (_) {}
+  }
+
   const salvalog = localStorage.getItem('lume_usuario');
   if (salvalog) {
     try {

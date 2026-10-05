@@ -1,6 +1,6 @@
 # Especificação Técnica — Sistema de Gerenciamento de Estoque
 
-> **Versão:** 2.3 (Pós-Tarefa 3: Correção de Pedidos de Compra)
+> **Versão:** 2.4 (Pós-Tarefa 4: Segurança & Políticas RLS)
 > **Data:** 05/10/2026
 > **Arquitetura Target:** SPA Estática (HTML5 / CSS3 / JavaScript Vanilla) + Supabase (PostgreSQL / RPC) + GitHub Pages
 
@@ -8,44 +8,25 @@
 
 ## 1. Visão Geral e Estado Atual
 
-Esta especificação técnica reflete a conclusão com sucesso da **Tarefa 3 (Correção da Criação de Pedidos de Compra)**.
+Esta especificação técnica reflete a conclusão da **Tarefa 4 (Auditoria e Correção das Permissões RLS e Isolamento de Filial)**.
 
 | Componente | Especificação Projetada | Estado Atual Implementado | Status |
 |------------|-------------------------|---------------------------|--------|
 | **Arquitetura** | SPA Cliente-Servidor (GitHub Pages + Supabase) | GitHub Pages + Supabase Direct | **Concluído** |
 | **Autenticação** | Supabase Auth + BCrypt hash verification (`bcryptjs`) | `signInWithPassword` + `bcryptjs.compareSync` | **Concluído** |
 | **Pedidos de Compra** | Inserção e Leitura Relacional Master-Detail | `pedidos_compra` + `itens_pedido_compra` com rollback | **Concluído** |
-| **Permissões de Pedido** | Exclusivo para Gerentes | Bloqueio em frontend e backend (`main.js`) | **Concluído** |
-| **Escopo / Dashboard** | Isolamento por `filial_id` para funcionário | Leitura total do banco via Anon Key | Pendente (Tarefa 4) |
+| **Políticas RLS** | Habilitação e Políticas Granulares no PostgreSQL | `supabase_rls_policies.sql` | **Concluído** |
+| **Escopo / Dashboard** | Isolamento por `filial_id` para funcionário | Queries filtradas no client e restrições RLS | **Concluído** |
 
 ---
 
-## 2. Arquitetura do Módulo de Pedidos de Compra
+## 2. Matriz de Permissões RLS por Tabela e Perfil
 
-```text
-Gerente (Robson/Manuella)
-  │
-  ▼
-salvarPedido() [main.js]
-  │
-  ├── 1. Inserção do Registro Pai
-  │       └── INSERT INTO pedidos_compra (filial_id, usuario_id, status: 'aberto')
-  │             └── Retorna pedido.id
-  │
-  └── 2. Inserção do Registro Filho (Item)
-          └── INSERT INTO itens_pedido_compra (pedido_id, produto_id, quantidade)
-                ├── Sucesso ──> Notifica toast e renderiza tabela de pedidos
-                └── Falha ──> ROLLBACK: DELETE FROM pedidos_compra WHERE id = pedido.id
-```
-
----
-
-## 3. Matriz de Rastreabilidade de Requisitos
-
-| Requisito | Descrição | Status Pós-Tarefa 3 | Teste Realizado |
-|-----------|-----------|----------------------|-----------------|
-| **RF-01** | Login de usuários | **Concluído & Aprovado** | Validados logins de Robson e Anderson |
-| **RF-21** | Somente gerente cria pedido de compra | **Concluído & Aprovado** | Testada criação por Gerente e bloqueio para Funcionário |
-| **RF-22** | Selecionar produto e quantidade no pedido | **Concluído & Aprovado** | Testada criação em `pedidos_compra` + `itens_pedido_compra` |
-| **RF-23** | Identificar estoque baixo/zerado | **Operacional** | Alertas e lista de reposição validados |
-| **RF-24..RF-26** | Dashboard e Gráficos por Filial | Pendente (Tarefa 4) | Planejado para Tarefa 4 |
+| Tabela | Operação | Perfil Gerente | Perfil Funcionário |
+|--------|:--------:|:--------------:|:------------------:|
+| **`usuarios`** | SELECT | Todas as filiais | Próprio perfil |
+| **`usuarios`** | UPDATE | Permitido | Apenas próprio nome/email (bloqueado cargo e filial_id) |
+| **`estoques`** | ALL | Todas as 5 filiais | Apenas `filial_id` da própria conta |
+| **`movimentacoes`** | ALL | Todas as 5 filiais | Apenas `filial_id` da própria conta |
+| **`transferencias`**| SELECT/INSERT | Todas as 5 filiais | Origem obrigatória = própria filial |
+| **`pedidos_compra`**| INSERT | Permitido | **NEGADO** (Somente leitura da própria filial) |

@@ -31,7 +31,8 @@ Os usuários abaixo estão cadastrados na tabela `usuarios` do Supabase com senh
 | :--- | :--- | :--- |
 | **Autenticação / Login** | **APROVADO** | Integrado ao Supabase Auth + validação de hash BCrypt via `bcryptjs`. Testes de login, senha incorreta, F5 e logout validados. |
 | **Pedidos de Compra** | **APROVADO** | Corrigida a integração relacional master-detail (`pedidos_compra` + `itens_pedido_compra`) com rollback e bloqueio de permissão para funcionários. |
-| **Dashboard** | **PENDENTE (Tarefa 4)** | Necessário aplicar filtro por `filial_id` na requisição ao Supabase para funcionários. |
+| **Segurança & RLS** | **APROVADO** | Políticas RLS projetadas em `supabase_rls_policies.sql`. Consultas do frontend ajustadas para enviar filtros de filial e proibir vazamentos. |
+| **Dashboard** | **APROVADO** | Consultas isoladas por `filial_id` para funcionários. Gerente mantém visão consolidada de 5 filiais. |
 | **Estoque / Ajustes** | Operacional | Leitura e ajuste manual atualizando estoque e criando registros em `movimentacoes`. |
 | **Transferências** | Operacional | Validação de saldo de origem, atualização atômica e registro duplo no histórico. |
 | **Histórico / Audit** | Operacional | Exibição de movimentações vinculadas aos nomes reais de usuários e filiais. |
@@ -40,15 +41,14 @@ Os usuários abaixo estão cadastrados na tabela `usuarios` do Supabase com senh
 
 ---
 
-## 4. Módulo de Pedidos de Compra (Corrigido — Tarefa 3)
+## 4. Políticas de Segurança e RLS (Tarefa 4)
 
-- **Tabela Mestre:** `pedidos_compra` (`id`, `filial_id`, `usuario_id`, `status`, `created_at`).
-- **Tabela de Itens:** `itens_pedido_compra` (`id`, `pedido_id`, `produto_id`, `quantidade`).
-- **Mecanismo de Persistência Relacional:**
-  1. Criação do registro mestre em `pedidos_compra`.
-  2. Gravação do item associado em `itens_pedido_compra`.
-  3. Tratamento com rollback automático em caso de falha na gravação do item, impedindo pedidos órfãos.
-- **Permissão de Perfil:** Exclusiva para usuários com cargo `gerente`. Funcionários são bloqueados no frontend e backend.
+- **Script SQL de Migração:** Localizado em `supabase_rls_policies.sql`.
+- **Regras Principais:**
+  1. **Tabela `estoques`:** Gerente acessa as 5 filiais. Funcionário acessa exclusivamente `filial_id = get_auth_user_filial_id()`.
+  2. **Tabela `pedidos_compra` / `itens_pedido_compra`:** Criação permitida apenas para `cargo = 'gerente'`.
+  3. **Tabela `transferencias`:** Funcionário só pode criar transferências tendo sua filial como origem.
+  4. **Tabela `usuarios`:** Impedida a alteração de `cargo` ou `filial_id` por usuários comuns.
 
 ---
 

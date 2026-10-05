@@ -1,17 +1,20 @@
-# Documentação do Projeto — Lume Joias (Versão 1.0 do projeto)
+# Documentação do Projeto — Lume Joias
 
-## 1. Link da Aplicação Hospedada
+## 1. Link da Aplicação Hospedada e Arquitetura
 
 ```text
 GitHub Pages:
 https://nickszxss.github.io/Lume-Joias/
 ```
 
+- **Arquitetura Real:** SPA Estática Client-Side (HTML5, CSS3, JavaScript Vanilla ES6+) hospedada no GitHub Pages comunicando-se diretamente com o Supabase PostgreSQL via SDK / REST API pública.
+- **Backend Java/Spring Boot:** Suprimido do fluxo de execução em produção; todas as operações ocorrem diretamente no cliente com Supabase.
+
 ---
 
-## 2. Dados de Login da Aplicação
+## 2. Dados de Usuários e Autenticação
 
-Os usuários abaixo estão cadastrados no banco de dados Supabase (com senhas criptografadas via BCrypt) e autenticados com segurança via RPC PostgreSQL (`validar_login` com `pgcrypto` server-side) sem dependência de backend Java:
+Os usuários abaixo estão cadastrados na tabela `usuarios` do Supabase com senhas em hash BCrypt:
 
 | Nome     | E-mail                        | Senha       | Cargo       | Permissões / Filial |
 | -------- | ----------------------------- | ----------- | ----------- | ------------------- |
@@ -20,96 +23,60 @@ Os usuários abaixo estão cadastrados no banco de dados Supabase (com senhas cr
 | Isabella | `isabella.func@empresa.com`   | etec2026@DS | Funcionário | Filial Norte (ID 2) |
 | Manuella | `manuella.grt@empresa.com`    | etec2026@DS | Gerente     | Acesso Geral (5 Filiais) |
 
----
-
-## 3. Módulo de Dashboard e Gráficos
-
-* **Indicadores/KPIs:** Total de itens em estoque, produtos cadastrados, itens com estoque baixo, estoque zerado e transferências pendentes.
-* **Gráfico 1 (Estoque por Filial):** Gráfico de barras (Chart.js) que calcula a soma das quantidades de produtos da tabela `estoques` para cada uma das 5 filiais (`Filial Centro`, `Filial Norte`, `Filial Sul`, `Filial Leste`, `Filial Oeste`).
-* **Gráfico 2 (Movimentações na Semana):** Gráfico de linhas (Chart.js) que consulta a tabela `movimentacoes` do Supabase para os últimos 7 dias, agrupando as quantidades por dia da semana (`['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb']`) divididas em séries de `entradas` e `saidas`.
-* **Gerenciamento de Instâncias:** As instâncias anteriores do Chart.js (`chartFilial`, `chartMov`) são destruídas com `.destroy()` antes de cada nova renderização para evitar conflitos no canvas.
+> **Diagnóstico de Auditoria (Login):**
+> A função RPC PostgreSQL `validar_login` **não está criada** no schema público do Supabase (`PGRST202`). O mecanismo de fallback em JavaScript realiza comparação direta em texto claro (`u.senha === senha`), a qual falha porque o banco armazena hashes BCrypt.
 
 ---
 
-## 4. Matriz de Homologação de Testes e Segurança
+## 3. Relatório de Auditoria Técnica (Outubro/2026)
 
-| Módulo / Funcionalidade | Status | Método de Teste | Observações |
-| :--- | :--- | :--- | :--- |
-| **Autenticação** | Aprovado | Automatizado & Manual | RPC PostgreSQL `validar_login` com `pgcrypto` validada. Bypass por mock desativado em produção. |
-| **Permissões de Perfil** | Aprovado | Automatizado & Manual | Escopo de 5 filiais e criação de pedidos restrita a Gerentes. Funcionários restritos à própria filial. |
-| **Estoque** | Aprovado | Automatizado | Ajustes manuais de entrada/saída gravando saldo e status sem permitir saldo negativo. |
-| **Transferências** | Aprovado | Automatizado | Conclusão atômica com baixa na origem, crédito no destino e gravação dupla no histórico. |
-| **Pedidos de Compra** | Aprovado | Automatizado | Nomes de produtos resolvidos sem rótulo genérico e quantidade exibida corretamente. |
-| **Dashboard** | Aprovado | Automatizado | KPIs, gráfico de barras por filial e gráfico de linha de movimentações dos últimos 7 dias. |
-| **Histórico** | Aprovado | Automatizado | Responsáveis identificados pelo nome real da tabela `usuarios`. |
-| **Responsividade** | Aprovado | Playwright (Video/Screenshot) | Testado em Desktop (1280x800), Tablet (768x1024) e Smartphone (375x667) nos temas Claro e Escuro. |
-| **Segurança & RLS** | Aprovado | Auditoria de Código | Senhas isoladas no banco, chave pública anon sem permissão de escrita arbitrária em usuários. |
+### 3.1 Problemas Confirmados e Causas Raízes
 
----
+1. **Falha no Login de Usuários (`validar_login` / BCrypt):**
+   - **Causa Raiz:** A RPC `validar_login` com extensão `pgcrypto` não foi executada/criada na instância do Supabase. O código JS em `main.js` tenta chamar a RPC, falha e cai em um fallback local que faz `u.senha === senha`. Como a coluna `senha` possui hash BCrypt (`$2a$10$...`), a comparação string falha.
 
-## 5. Problemas Conhecidos, Limitações e Dependências Externas
+2. **Falha e Dados Incompletos em Pedidos de Compra:**
+   - **Causa Raiz:** O schema real do Supabase utiliza modelo normalizado master-detail (tabela `pedidos_compra` vinculada à tabela `itens_pedido_compra`). O código frontend `main.js` tenta inserir `produto_id` e `quantidade` diretamente em `pedidos_compra`, onde estas colunas não existem. Ao listar, os campos aparecem vazios/indefinidos.
 
-* **Dependência do Supabase:** Como a aplicação executa client-side (SPA no GitHub Pages), a disponibilidade total depende dos serviços do Supabase (REST/RPC).
-* **Execução das Migrações e RPCs:** A validação segura de login via `validar_login` requer a execução prévia do script SQL com a extensão `pgcrypto` no Supabase.
-* **Limitação do Chart.js em Viewports Extremamente Pequenos (<320px):** Em telas com menos de 320px de largura, a legenda do Chart.js de movimentações semanais pode sofrer quebra de linha.
+3. **Vazamento de Dados de Outras Filiais no Dashboard do Funcionário:**
+   - **Causa Raiz:** A função `resumoDashboard` em `main.js` consulta a tabela `estoques` sem aplicar filtro de `filial_id` na requisição ao Supabase. Todos os registros de estoque das 5 filiais são baixados no cliente, permitindo visualização de dados restritos e violando a regra de escopo de filial.
+
+4. **Inconsistências de Responsividade Mobile e Modais:**
+   - **Causa Raiz:** Elementos de tabela e diálogos modais em telas menores que 400px sofrem com falta de rolagem vertical/horizontal adequada ou truncamento de botões de ação.
 
 ---
 
-## 6. Design System e Responsividade
+## 4. Matriz de Homologação e Diagnóstico por Módulo
 
-* **Breakpoints CSS:** Unificado em `@media (max-width: 900px)` para transição do menu lateral (sidebar de 220px) para cabeçalho superior fixo com barra de navegação pill horizontal (`#menu`), cobrindo perfeitamente Tablets (768px x 1024px) e Smartphones (375px x 667px).
-* **Rolagem e Usabilidade de Tabelas:** Todas as tabelas são contidas em cards com `overflow-x: auto` com suporte a toque (`-webkit-overflow-scrolling: touch`), scrollbars na cor rose primary e indicação visual `"← Deslize para ver mais →"`.
-* **Identidade Visual:** Paleta rose primária (`#9d3b5c` para light mode e `#c65b7e` para dark mode), fontes Cormorant Garamond, Montserrat e Poppins mantidas e testadas.
-
----
-
-## 5. Módulo de Histórico e Movimentações
-
-* **Tabela Supabase:** `movimentacoes`
-* **Identificação do Responsável:** Cruzamento da FK `usuario_id` com a tabela `usuarios` (`client.from('usuarios').select('id, nome')`), eliminando a exibição do nome genérico `'Usuário'`. Registros antigos ou sem usuário vinculado apresentam o rótulo amigável `'Sistema'`.
-* **Auditoria de Operações:** Gravado o `usuario_id` do operador em ajustes manuais de estoque e nas 2 movimentações geradas na conclusão de transferências (saída na origem e entrada no destino).
-
----
-
-## 5. Módulo de Pedidos de Compra
-
-* **Tabela Supabase:** `pedidos_compra`
-* **Mapeamento de Campos:** Suporte flexível às variações de colunas (`quantidade` / `qtd`, `produto_id` / `produtoId`, `filial_id` / `filialId`, `solicitante` / `usuario`).
-* **Relacionamento com Produtos:** Cruzamento seguro de IDs (`String(prd.id) === String(p.produto_id)`) com fallback para o nome retornado pela lista de produtos em cache (`nomeProduto()`) ou identificador `Produto #ID` em registros incompletos, eliminando exibições de `undefined` e `Produto` genérico.
-* **Permissões:** Criação de pedidos restrita exclusivamente a usuários com perfil `gerente`.
+| Módulo / Funcionalidade | Status da Auditoria | Diagnóstico Técnico |
+| :--- | :--- | :--- |
+| **Autenticação / Login** | **CRÍTICO** | Função RPC `validar_login` ausente no Supabase; fallback JS incompatível com hashes BCrypt. |
+| **Pedidos de Compra** | **CRÍTICO** | Mapeamento incorreto de colunas/tabelas (`pedidos_compra` vs `itens_pedido_compra`). |
+| **Dashboard** | **ATENÇÃO** | Vazamento de dados client-side para funcionários por falta de filtro de filial nas queries. |
+| **Estoque / Ajustes** | Operacional | Leitura e ajuste manual atualizando estoque e criando registros em `movimentacoes`. |
+| **Transferências** | Operacional | Validação de saldo de origem, atualização atômica e registro duplo no histórico. |
+| **Histórico / Audit** | Operacional | Exibição de movimentações vinculadas aos nomes reais de usuários e filiais. |
+| **Design / Tema** | Operacional | Alternância entre Modo Claro (rose `#9d3b5c`) e Escuro (`#c65b7e`) funcional. |
+| **Responsividade** | Ajustes Pendentes | Suporte a breakpoint em 900px ativo, com pendências de ajuste fino para viewports <400px. |
 
 ---
 
-## 4. Status de Implementação e Funcionalidades
+## 5. Schema Real do Banco de Dados Supabase (Confirmado)
 
-### Funcionalidades Implementadas
-- [x] **Autenticação Real:** Login com Nome, E-mail e Senha validados no backend Spring Boot contra o banco PostgreSQL no Supabase.
-- [x] **Controle de Acesso e Permissões:** Separação estrita de perfis (Funcionário restrito à sua filial e sem criar pedidos de compra; Gerente com acesso às 5 filiais e permissão total para criar pedidos).
-- [x] **Gestão de Produtos e Estoque:** Listagem, busca, filtro por status (Suficiente, Baixo, Zerado) e ajustes de movimentação (Entrada/Saída).
-- [x] **Transferências entre Filiais:** Solicitação e conclusão de transferências de produtos entre filiais.
-- [x] **Pedidos de Compra:** Criação de pedidos de compra exclusiva para Gerentes.
-- [x] **Alertas de Estoque:** Painel e listagem dedicada de itens com estoque baixo ou zerado.
-- [x] **Histórico Auditável:** Registro detalhado de movimentações (data/hora, produto, filial, tipo, quantidade anterior, quantidade nova, usuário e motivo).
-- [x] **Identidade Visual e Logo:** Exibição da logo oficial `Lume.png` (modo claro) e `LumeEscuro.png` (modo escuro) na tela de login e na sidebar.
-
-### Planejado / Não Implementado
-- [ ] Módulo de Relatórios Avançados e exportação em PDF/Excel.
-- [ ] Notificações em tempo real (WebSockets / Push Notifications).
+- `usuarios`: `id`, `nome`, `email`, `senha` (BCrypt), `cargo`, `tipo`, `filial_id`, `ativo`, `created_at`
+- `filiais`: `id`, `nome`, `endereco`, `cidade`, `estado`, `ativa`, `created_at`
+- `produtos`: `id`, `nome`, `descricao`, `codigo` (SKU), `unidade_medida`, `qtd_minima`, `ativo`, `created_at`
+- `estoques`: `id`, `filial_id`, `produto_id`, `quantidade`, `status`, `updated_at`
+- `movimentacoes`: `id`, `produto_id`, `filial_id`, `usuario_id`, `tipo`, `quantidade`, `quantidade_anterior`, `quantidade_nova`, `motivo`, `created_at`
+- `transferencias`: `id`, `origem_id`, `destino_id`, `produto_id`, `usuario_id`, `quantidade`, `status`, `observacao`, `created_at`, `concluida_at`
+- `pedidos_compra`: `id`, `filial_id`, `usuario_id`, `status`, `observacao`, `created_at`, `recebido_at`
+- `itens_pedido_compra`: `id`, `pedido_id`, `produto_id`, `quantidade`
 
 ---
 
-## 4. Detalhes Adicionais do Projeto
+## 6. Plano Recomendado de Correção (Ordem de Execução para Tarefas Seguintes)
 
-### Arquitetura Real
-```text
-Frontend (HTML5 / CSS3 / JS ES6+)
-  ↓ (API REST / JSON via HTTP)
-Backend Spring Boot (Java 17)
-  ↓ (Driver JDBC / HikariCP)
-Banco de Dados Supabase (PostgreSQL)
-```
-
-- **Frontend:** HTML5, CSS3, JavaScript (ES6+) e Chart.js. Hospedado no GitHub Pages (disparado via GitHub Actions em `.github/workflows/static.yml` publicando o diretório `src/main/resources/static`).
-- **Backend:** Java 17 com Spring Boot 3 executando a lógica de negócio, orquestração e autorização.
-- **Autenticação:** Endpoint `POST /api/auth/login` validando Nome, E-mail e Senha enviando JSON `{ "nome": "...", "email": "...", "senha": "..." }`. Retorna HTTP 200 OK com o perfil do usuário ou HTTP 401 Unauthorized em caso de credenciais inválidas ou campos vazios.
-- **Banco de Dados:** Supabase PostgreSQL (via Supabase Pooler IPv4/IPv6).
+1. **Migração Supabase (RPC `validar_login` & Hashes):** Criar e validar a RPC de autenticação segura no PostgreSQL.
+2. **Correção de Pedidos de Compra:** Adaptar o frontend e/ou schema para lidar corretamente com `pedidos_compra` e `itens_pedido_compra`.
+3. **Isolamento de Dados no Dashboard:** Garantir que consultas ao Supabase respeitem estritamente o `filial_id` do usuário logado.
+4. **Refinamento de Responsividade:** Ajustar CSS para tabelas e modais em telas <400px.

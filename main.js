@@ -716,10 +716,21 @@ const api = {
     }
     const client = getSupabaseClient();
     if (client) {
-      const { data: listE } = await client.from('estoques').select('*');
+      let queryE = client.from('estoques').select('*');
+      if (usuario && usuario.tipo === 'funcionario' && usuario.filial_id) {
+        queryE = queryE.eq('filial_id', usuario.filial_id);
+      } else if (filialId) {
+        queryE = queryE.eq('filial_id', filialId);
+      }
+      const { data: listE } = await queryE;
       const { data: listP } = await client.from('produtos').select('*');
       const { data: listF } = await client.from('filiais').select('*');
-      const { data: listT } = await client.from('transferencias').select('*');
+
+      let queryT = client.from('transferencias').select('*');
+      if (usuario && usuario.tipo === 'funcionario' && usuario.filial_id) {
+        queryT = queryT.or(`origem_id.eq.${usuario.filial_id},destino_id.eq.${usuario.filial_id}`);
+      }
+      const { data: listT } = await queryT;
 
       if (listE && listP && listF) {
         const targetFilial = filialId || (usuario && usuario.tipo === 'funcionario' ? usuario.filial_id : null);
@@ -1190,7 +1201,7 @@ async function renderDashboard(){
 }
 
 function pintarKpis(dados){
-  const fid = filialDashSel;
+  const fid = filialDashSel || (usuario && usuario.tipo === 'funcionario' ? usuario.filial_id : null);
   const kpis = $('dash-kpis');
   if (kpis) {
     kpis.innerHTML = `

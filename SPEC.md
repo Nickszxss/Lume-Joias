@@ -1,6 +1,6 @@
 # Especificação Técnica — Sistema de Gerenciamento de Estoque
 
-> **Versão:** 2.5 (Pós-Tarefa 5: Correção do Dashboard do Funcionário)
+> **Versão:** 2.6 (Pós-Tarefa 6: Ajustes Responsivos)
 > **Data:** 05/10/2026
 > **Arquitetura Target:** SPA Estática (HTML5 / CSS3 / JavaScript Vanilla) + Supabase (PostgreSQL / RPC) + GitHub Pages
 
@@ -8,7 +8,7 @@
 
 ## 1. Visão Geral e Estado Atual
 
-Esta especificação técnica reflete a conclusão da **Tarefa 5 (Correção do Dashboard do Funcionário)**.
+Esta especificação técnica reflete a conclusão da **Tarefa 6 (Ajustes Responsivos do Lume Joias)**.
 
 | Componente | Especificação Projetada | Estado Atual Implementado | Status |
 |------------|-------------------------|---------------------------|--------|
@@ -17,18 +17,22 @@ Esta especificação técnica reflete a conclusão da **Tarefa 5 (Correção do 
 | **Pedidos de Compra** | Inserção e Leitura Relacional Master-Detail | `pedidos_compra` + `itens_pedido_compra` com rollback | **Concluído** |
 | **Políticas RLS** | Habilitação e Políticas Granulares no PostgreSQL | `supabase_rls_policies.sql` | **Concluído** |
 | **Escopo / Dashboard** | Isolamento por `filial_id` para funcionário | Queries filtradas no client (REST) e restrições RLS | **Concluído** |
+| **Responsividade** | Support a 375px, 390px, 768px, Tablet e Desktop | Breakpoints otimizados, modais scroll em 88vh, sem overflow do body | **Concluído** |
 
 ---
 
-## 2. Comportamento do Dashboard por Perfil
+## 2. Resoluções Homologadas e Comportamento Visual
 
-- **Funcionário (Anderson/Isabella):**
-  - O gráfico "Estoque por Filial" exibe unicamente 1 barra com o saldo da filial atribuída (`Filial Centro`).
-  - O gráfico de linhas "Movimentações (7 dias)" exibe entradas e saídas restritas à filial atribuída.
-  - A tabela de alertas lista produtos com estoque baixo ou zerado pertencentes exclusivamente à sua filial.
-  - O payload da resposta HTTP da API Supabase não contém registros de outras filiais.
+- **Smartphone 375px & 390px (e.g. iPhone SE / 12 / 13 / 14):**
+  - Sidebar oculta e transformada em top bar fixa grid (`.logo`, `.theme-toggle-container`, `.user-box`).
+  - Menu de navegação pill horizontal com scroll suave tátil.
+  - Modais com `max-height: 88vh; overflow-y: auto` e botões empilhados verticalmente.
+  - Tabelas contidas em cards com `overflow-x: auto` e aviso visual *"← Deslize para ver mais →"*.
+  - `body { overflow-x: hidden; }` impedindo rolagem lateral indesejada da página.
 
-- **Gerente (Robson/Manuella):**
-  - O gráfico "Estoque por Filial" exibe 5 barras representativas das 5 filiais oficiais.
-  - Os KPIs refletem o saldo consolidado global de todas as filiais.
-  - O filtro superior permite isolar o Dashboard por qualquer uma das 5 filiais individualmente.
+- **Tablet 768px (Portrait) & 1024px (Landscape):**
+  - Transição fluida de visualização em 2 colunas para 1 coluna nos gráficos e cards do Dashboard.
+  - Navegação tátil responsiva em abas no menu superior.
+
+- **Desktop (1366px+):**
+  - Sidebar lateral fixa de 250px mantida.

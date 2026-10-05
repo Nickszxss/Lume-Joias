@@ -860,44 +860,59 @@ async function fazerLogin(){
 
   try {
     let resposta = null;
-
-    // Tentar autenticar via RPC no Supabase (validação segura de BCrypt server-side)
     const client = getSupabaseClient();
-    if (client) {
-      const { data, error } = await client.rpc('validar_login', {
-        p_nome: nome,
-        p_email: email,
-        p_senha: senha
-      });
 
-      if (error) {
-        console.warn('Erro ao chamar RPC validar_login, tentando fallback direto:', error.message);
-      } else if (data && data.length > 0) {
-        const u = data[0];
-        const cargo = (u.cargo || u.tipo || 'funcionario').toLowerCase();
-        resposta = {
-          id: u.id,
-          nome: u.nome,
-          email: u.email,
-          cargo: cargo,
-          tipo: cargo,
-          filial_id: u.filial_id ?? (cargo === 'gerente' ? null : 1)
-        };
+    // 1. Tentar autenticação via Supabase Auth nativo (signInWithPassword)
+    if (client && client.auth) {
+      try {
+        const { data: authData, error: authErr } = await client.auth.signInWithPassword({
+          email: email,
+          password: senha
+        });
+
+        if (!authErr && authData && authData.user) {
+          const { data: uData } = await client
+            .from('usuarios')
+            .select('id, nome, email, cargo, tipo, filial_id')
+            .ilike('email', email)
+            .single();
+
+          const u = uData || {};
+          const cargo = (u.cargo || u.tipo || authData.user.user_metadata?.cargo || 'funcionario').toLowerCase();
+          resposta = {
+            id: u.id || authData.user.id,
+            nome: u.nome || authData.user.user_metadata?.nome || nome,
+            email: email,
+            cargo: cargo,
+            tipo: cargo,
+            filial_id: u.filial_id ?? (cargo === 'gerente' ? null : 1),
+            access_token: authData.session?.access_token
+          };
+        }
+      } catch (authException) {
+        console.warn('Supabase Auth signInWithPassword indisponível, tentando validação de perfil:', authException);
       }
     }
 
-    // Se a RPC não estiver criada ainda no Supabase, fallback seguro tentando comparação de hash/texto puro
+    // 2. Se a autenticação no Supabase Auth não retornar sessão, consultar public.usuarios
+    // e validar a senha usando hash BCrypt (sem comparação de texto claro).
     if (!resposta && client) {
       const { data, error } = await client
         .from('usuarios')
-        .select('id, nome, email, senha, cargo, filial_id')
+        .select('id, nome, email, senha, cargo, tipo, filial_id')
         .ilike('email', email)
         .limit(1);
 
       if (!error && data && data.length > 0) {
         const u = data[0];
         const nomeValido = u.nome && u.nome.trim().toLowerCase() === nome.toLowerCase();
-        const senhaValida = u.senha && u.senha === senha;
+
+        // Validação segura de BCrypt via biblioteca dcodeIO/bcryptjs
+        let senhaValida = false;
+        const bcryptLib = (typeof dcodeIO !== 'undefined' && dcodeIO.bcrypt) ? dcodeIO.bcrypt : (typeof bcrypt !== 'undefined' ? bcrypt : null);
+        if (bcryptLib && typeof bcryptLib.compareSync === 'function') {
+          senhaValida = bcryptLib.compareSync(senha, u.senha);
+        }
 
         if (nomeValido && senhaValida) {
           const cargo = (u.cargo || u.tipo || 'funcionario').toLowerCase();
@@ -909,6 +924,15 @@ async function fazerLogin(){
             tipo: cargo,
             filial_id: u.filial_id ?? (cargo === 'gerente' ? null : 1)
           };
+
+          // Auto-provisionar no Supabase Auth para habilitar sessões JWT nativas futuramente
+          if (client.auth) {
+            client.auth.signUp({
+              email: email,
+              password: senha,
+              options: { data: { nome: u.nome, cargo: cargo, filial_id: u.filial_id } }
+            }).catch(() => {});
+          }
         }
       }
     }
@@ -985,7 +1009,11 @@ async function aplicarLogin(dadosUsuario){
   irPara('dashboard');
 }
 
-function sair(){
+async function sair(){
+  const client = getSupabaseClient();
+  if (client && client.auth) {
+    try { await client.auth.signOut(); } catch (_) {}
+  }
   usuario = null;
   localStorage.removeItem('lume_usuario');
   const appScreen = $('app');
@@ -995,7 +1023,36 @@ function sair(){
   if (loginScreen) loginScreen.style.display = 'flex';
 }
 
-function verificarSessaoAtiva(){
+async function verificarSessaoAtiva(){
+  const client = getSupabaseClient();
+  if (client && client.auth) {
+    try {
+      const { data } = await client.auth.getSession();
+      if (data && data.session && data.session.user) {
+        const authUser = data.session.user;
+        const { data: uData } = await client
+          .from('usuarios')
+          .select('id, nome, email, cargo, tipo, filial_id')
+          .ilike('email', authUser.email)
+          .single();
+
+        if (uData) {
+          const cargo = (uData.cargo || uData.tipo || 'funcionario').toLowerCase();
+          aplicarLogin({
+            id: uData.id,
+            nome: uData.nome,
+            email: uData.email,
+            cargo: cargo,
+            tipo: cargo,
+            filial_id: uData.filial_id ?? (cargo === 'gerente' ? null : 1),
+            access_token: data.session.access_token
+          });
+          return;
+        }
+      }
+    } catch (_) {}
+  }
+
   const salvalog = localStorage.getItem('lume_usuario');
   if (salvalog) {
     try {

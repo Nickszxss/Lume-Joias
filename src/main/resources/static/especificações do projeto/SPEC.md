@@ -1,6 +1,6 @@
 # Especificação Técnica — Sistema de Gerenciamento de Estoque
 
-> **Versão:** 2.2 (Pós-Tarefa 2: Autenticação Segura)
+> **Versão:** 2.3 (Pós-Tarefa 3: Correção de Pedidos de Compra)
 > **Data:** 05/10/2026
 > **Arquitetura Target:** SPA Estática (HTML5 / CSS3 / JavaScript Vanilla) + Supabase (PostgreSQL / RPC) + GitHub Pages
 
@@ -8,46 +8,44 @@
 
 ## 1. Visão Geral e Estado Atual
 
-Esta especificação técnica reflete a conclusão com sucesso da **Tarefa 2 (Autenticação Segura e Correção de Login)**.
+Esta especificação técnica reflete a conclusão com sucesso da **Tarefa 3 (Correção da Criação de Pedidos de Compra)**.
 
 | Componente | Especificação Projetada | Estado Atual Implementado | Status |
 |------------|-------------------------|---------------------------|--------|
 | **Arquitetura** | SPA Cliente-Servidor (GitHub Pages + Supabase) | GitHub Pages + Supabase Direct | **Concluído** |
 | **Autenticação** | Supabase Auth + BCrypt hash verification (`bcryptjs`) | `signInWithPassword` + `bcryptjs.compareSync` | **Concluído** |
-| **Sessão & Persistence** | Supabase Auth Session + `localStorage` (`lume_usuario`) | Restore automático em `verificarSessaoAtiva()` | **Concluído** |
-| **Logout & Expir** | `signOut()` + limpeza de tokens e localStorage | Fluxo limpo e seguro | **Concluído** |
-| **Pedidos de Compra** | Relação Pedidos x Produtos | `pedidos_compra` + `itens_pedido_compra` | Pendente (Tarefa 3) |
+| **Pedidos de Compra** | Inserção e Leitura Relacional Master-Detail | `pedidos_compra` + `itens_pedido_compra` com rollback | **Concluído** |
+| **Permissões de Pedido** | Exclusivo para Gerentes | Bloqueio em frontend e backend (`main.js`) | **Concluído** |
 | **Escopo / Dashboard** | Isolamento por `filial_id` para funcionário | Leitura total do banco via Anon Key | Pendente (Tarefa 4) |
 
 ---
 
-## 2. Arquitetura do Módulo de Autenticação
+## 2. Arquitetura do Módulo de Pedidos de Compra
 
 ```text
-Usuário
-  │  (Nome, E-mail, Senha)
+Gerente (Robson/Manuella)
+  │
   ▼
-fazerLogin() [main.js]
+salvarPedido() [main.js]
   │
-  ├── 1. Tenta client.auth.signInWithPassword({ email, password })
-  │       ├── Sucesso ──> Carrega perfil em public.usuarios e salva access_token
-  │       └── Falha / Não provisionado ──> Segue para o Passo 2
+  ├── 1. Inserção do Registro Pai
+  │       └── INSERT INTO pedidos_compra (filial_id, usuario_id, status: 'aberto')
+  │             └── Retorna pedido.id
   │
-  └── 2. Consulta public.usuarios por e-mail
-          ├── Compara hash BCrypt via bcryptjs.compareSync(senha, u.senha)
-          │     ├── Valido ──> Inicia sessão, salva perfil e dispara client.auth.signUp()
-          │     └── Invalido ──> Exibe alerta toast "Acesso negado"
+  └── 2. Inserção do Registro Filho (Item)
+          └── INSERT INTO itens_pedido_compra (pedido_id, produto_id, quantidade)
+                ├── Sucesso ──> Notifica toast e renderiza tabela de pedidos
+                └── Falha ──> ROLLBACK: DELETE FROM pedidos_compra WHERE id = pedido.id
 ```
 
 ---
 
 ## 3. Matriz de Rastreabilidade de Requisitos
 
-| Requisito | Descrição | Status Pós-Tarefa 2 | Teste Realizado |
+| Requisito | Descrição | Status Pós-Tarefa 3 | Teste Realizado |
 |-----------|-----------|----------------------|-----------------|
 | **RF-01** | Login de usuários | **Concluído & Aprovado** | Validados logins de Robson e Anderson |
-| **RF-02** | Dois tipos de usuário: gerente e funcionário | **Concluído & Aprovado** | Roles `gerente` e `funcionario` mantidas |
-| **RF-03..RF-05** | Escopo de filial por usuário | Parcial (Front ok, Dashboard pendente) | Botões restritos para funcionários |
-| **RF-06..RF-20** | CRUD Produtos, Estoques, Transferências e Histórico | **Operacional** | Aprovados em integração |
-| **RF-21..RF-23** | Pedidos de Compra | Pendente (Tarefa 3) | Planejado para próxima tarefa |
-| **RF-24..RF-26** | Dashboard e Gráficos | Pendente (Tarefa 4) | Planejado para Tarefa 4 |
+| **RF-21** | Somente gerente cria pedido de compra | **Concluído & Aprovado** | Testada criação por Gerente e bloqueio para Funcionário |
+| **RF-22** | Selecionar produto e quantidade no pedido | **Concluído & Aprovado** | Testada criação em `pedidos_compra` + `itens_pedido_compra` |
+| **RF-23** | Identificar estoque baixo/zerado | **Operacional** | Alertas e lista de reposição validados |
+| **RF-24..RF-26** | Dashboard e Gráficos por Filial | Pendente (Tarefa 4) | Planejado para Tarefa 4 |

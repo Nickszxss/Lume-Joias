@@ -30,7 +30,7 @@ Os usuários abaixo estão cadastrados na tabela `usuarios` do Supabase com senh
 | Módulo / Funcionalidade | Status da Auditoria | Diagnóstico Técnico & Implementação |
 | :--- | :--- | :--- |
 | **Autenticação / Login** | **APROVADO** | Integrado ao Supabase Auth + validação de hash BCrypt via `bcryptjs`. Testes de login, senha incorreta, F5 e logout validados. |
-| **Pedidos de Compra** | **PENDENTE (Tarefa 3)** | Mapeamento incorreto de colunas/tabelas (`pedidos_compra` vs `itens_pedido_compra`). |
+| **Pedidos de Compra** | **APROVADO** | Corrigida a integração relacional master-detail (`pedidos_compra` + `itens_pedido_compra`) com rollback e bloqueio de permissão para funcionários. |
 | **Dashboard** | **PENDENTE (Tarefa 4)** | Necessário aplicar filtro por `filial_id` na requisição ao Supabase para funcionários. |
 | **Estoque / Ajustes** | Operacional | Leitura e ajuste manual atualizando estoque e criando registros em `movimentacoes`. |
 | **Transferências** | Operacional | Validação de saldo de origem, atualização atômica e registro duplo no histórico. |
@@ -40,16 +40,15 @@ Os usuários abaixo estão cadastrados na tabela `usuarios` do Supabase com senh
 
 ---
 
-## 4. Testes Automatizados Executados (Tarefa 2)
+## 4. Módulo de Pedidos de Compra (Corrigido — Tarefa 3)
 
-| Caso de Teste | Resultado | Método / Detalhes |
-| :--- | :--- | :--- |
-| **Campos Vazios** | PASSOU | Bloqueio no frontend exibindo notificação toast amigável. |
-| **Senha Incorreta** | PASSOU | Rejeição segura sem expor dados do usuário. |
-| **Login Gerente (Robson)** | PASSOU | Sessão iniciada como Gerente com acesso total a 5 filiais. |
-| **Persistência de Sessão (F5)** | PASSOU | Sessão restaurada do `localStorage` / Supabase Auth sem desconectar. |
-| **Logout Definitivo** | PASSOU | Chamada `signOut()`, limpeza de tokens e redirecionamento à tela de login. |
-| **Login Funcionário (Anderson)** | PASSOU | Sessão iniciada como Funcionário com botão de criar pedidos desabilitado. |
+- **Tabela Mestre:** `pedidos_compra` (`id`, `filial_id`, `usuario_id`, `status`, `created_at`).
+- **Tabela de Itens:** `itens_pedido_compra` (`id`, `pedido_id`, `produto_id`, `quantidade`).
+- **Mecanismo de Persistência Relacional:**
+  1. Criação do registro mestre em `pedidos_compra`.
+  2. Gravação do item associado em `itens_pedido_compra`.
+  3. Tratamento com rollback automático em caso de falha na gravação do item, impedindo pedidos órfãos.
+- **Permissão de Perfil:** Exclusiva para usuários com cargo `gerente`. Funcionários são bloqueados no frontend e backend.
 
 ---
 

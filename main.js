@@ -537,16 +537,24 @@ const api = {
   listarPedidos: async () => {
     const client = getSupabaseClient();
     if (client) {
-      const { data, error } = await client.from('pedidos_compra').select('*').order('id', { ascending: false });
-      if (!error && data) {
+      const { data: pedidosData, error: pErr } = await client.from('pedidos_compra').select('*').order('id', { ascending: false });
+      if (!pErr && pedidosData) {
+        const { data: itensData } = await client.from('itens_pedido_compra').select('*');
         const { data: prods } = await client.from('produtos').select('id, nome');
         const { data: fils } = await client.from('filiais').select('id, nome');
-        return data.map(p => {
-          const pid = p.produto_id ?? p.produtoId ?? p.produto_ID;
-          const fid = p.filial_id ?? p.filialId ?? p.filial_ID;
+        const { data: usrs } = await client.from('usuarios').select('id, nome');
+
+        return pedidosData.map(p => {
+          const itensDoPedido = itensData ? itensData.filter(i => String(i.pedido_id) === String(p.id)) : [];
+          const primeiroItem = itensDoPedido.length > 0 ? itensDoPedido[0] : null;
+
+          const pid = primeiroItem ? primeiroItem.produto_id : (p.produto_id ?? p.produtoId);
+          const fid = p.filial_id ?? p.filialId;
+          const qtd = primeiroItem ? primeiroItem.quantidade : (p.quantidade ?? p.qtd ?? 0);
+
           const prdEncontrado = prods?.find(prd => String(prd.id) === String(pid));
           const filEncontrada = fils?.find(f => String(f.id) === String(fid));
-          const qtd = p.quantidade ?? p.qtd ?? p.quant ?? 0;
+          const usrEncontrado = usrs?.find(u => String(u.id) === String(p.usuario_id));
 
           return {
             id: p.id,
@@ -555,9 +563,10 @@ const api = {
             quantidade: qtd,
             filial_id: fid,
             filialNome: filEncontrada ? filEncontrada.nome : (nomeFilial(fid) !== '—' ? nomeFilial(fid) : `Filial #${fid || 'N/A'}`),
-            solicitante: p.solicitante || p.usuario || p.usuario_nome || 'Gerente',
+            solicitante: usrEncontrado ? usrEncontrado.nome : (p.solicitante || p.usuario || 'Gerente'),
             data: p.created_at ? new Date(p.created_at).toLocaleDateString('pt-BR') : (p.data || new Date().toLocaleDateString('pt-BR')),
-            status: p.status || 'aberto'
+            status: p.status || 'aberto',
+            itens: itensDoPedido
           };
         });
       }
@@ -566,32 +575,63 @@ const api = {
   },
 
   criarPedido: async (dados) => {
+    if (usuario && usuario.tipo !== 'gerente') {
+      throw new Error('Apenas gerentes possuem permissão para criar pedidos.');
+    }
+    if (!dados.produtoId || !dados.filialId || !dados.quantidade || dados.quantidade <= 0) {
+      throw new Error('Informe um produto, filial e quantidade válida maior que zero.');
+    }
+
     const client = getSupabaseClient();
     if (client) {
-      const payload = {
-        produto_id: dados.produtoId,
+      // 1. Inserir o registro pai na tabela pedidos_compra
+      const payloadPedido = {
         filial_id: dados.filialId,
-        quantidade: dados.quantidade,
-        solicitante: dados.solicitante || (usuario ? usuario.nome : 'Gerente'),
+        usuario_id: usuario ? usuario.id : null,
         status: 'aberto',
         created_at: new Date().toISOString()
       };
-      const { data, error } = await client.from('pedidos_compra').insert([payload]).select().single();
-      if (!error && data) {
-        const pid = data.produto_id ?? data.produtoId;
-        const fid = data.filial_id ?? data.filialId;
-        return {
-          id: data.id,
-          produto_id: pid,
-          produtoNome: nomeProduto(pid),
-          quantidade: data.quantidade ?? data.qtd ?? dados.quantidade,
-          filial_id: fid,
-          filialNome: nomeFilial(fid),
-          solicitante: data.solicitante || (usuario ? usuario.nome : 'Gerente'),
-          data: new Date().toLocaleDateString('pt-BR'),
-          status: 'aberto'
-        };
+
+      const { data: pedido, error: pErr } = await client
+        .from('pedidos_compra')
+        .insert([payloadPedido])
+        .select()
+        .single();
+
+      if (pErr || !pedido) {
+        throw new Error(pErr?.message || 'Erro ao criar registro do pedido de compra.');
       }
+
+      // 2. Inserir os itens do pedido na tabela itens_pedido_compra
+      const payloadItem = {
+        pedido_id: pedido.id,
+        produto_id: dados.produtoId,
+        quantidade: dados.quantidade
+      };
+
+      const { data: item, error: iErr } = await client
+        .from('itens_pedido_compra')
+        .insert([payloadItem])
+        .select()
+        .single();
+
+      if (iErr) {
+        // Rollback: se a gravação do item falhar, excluir o pedido pai para evitar pedido incompleto
+        await client.from('pedidos_compra').delete().eq('id', pedido.id);
+        throw new Error(iErr.message || 'Erro ao gravar os itens do pedido de compra.');
+      }
+
+      return {
+        id: pedido.id,
+        produto_id: dados.produtoId,
+        produtoNome: nomeProduto(dados.produtoId),
+        quantidade: dados.quantidade,
+        filial_id: dados.filialId,
+        filialNome: nomeFilial(dados.filialId),
+        solicitante: usuario ? usuario.nome : 'Gerente',
+        data: new Date().toLocaleDateString('pt-BR'),
+        status: 'aberto'
+      };
     }
     return apiRequest('/pedidos', { method: 'POST', body: JSON.stringify(dados) });
   },

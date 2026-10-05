@@ -32,23 +32,19 @@ Os usuários abaixo estão cadastrados na tabela `usuarios` do Supabase com senh
 | **Autenticação / Login** | **APROVADO** | Integrado ao Supabase Auth + validação de hash BCrypt via `bcryptjs`. Testes de login, senha incorreta, F5 e logout validados. |
 | **Pedidos de Compra** | **APROVADO** | Corrigida a integração relacional master-detail (`pedidos_compra` + `itens_pedido_compra`) com rollback e bloqueio de permissão para funcionários. |
 | **Segurança & RLS** | **APROVADO** | Políticas RLS projetadas em `supabase_rls_policies.sql`. Consultas do frontend ajustadas para enviar filtros de filial e proibir vazamentos. |
-| **Dashboard** | **APROVADO** | Consultas isoladas por `filial_id` para funcionários. Gerente mantém visão consolidada de 5 filiais. |
+| **Dashboard** | **APROVADO** | Consultas e gráficos isolados estritamente no nível da query HTTP por `filial_id` para funcionários. Gerente mantém visão consolidada de 5 filiais. |
 | **Estoque / Ajustes** | Operacional | Leitura e ajuste manual atualizando estoque e criando registros em `movimentacoes`. |
 | **Transferências** | Operacional | Validação de saldo de origem, atualização atômica e registro duplo no histórico. |
 | **Histórico / Audit** | Operacional | Exibição de movimentações vinculadas aos nomes reais de usuários e filiais. |
 | **Design / Tema** | Operacional | Alternância entre Modo Claro (rose `#9d3b5c`) e Escuro (`#c65b7e`) funcional. |
-| **Responsividade** | **PENDENTE (Tarefa 5)** | Suporte a breakpoint em 900px ativo, com pendências de ajuste fino para viewports <400px. |
+| **Responsividade** | **PENDENTE (Tarefa 6)** | Suporte a breakpoint em 900px ativo, com pendências de ajuste fino para viewports <400px. |
 
 ---
 
-## 4. Políticas de Segurança e RLS (Tarefa 4)
+## 4. Módulo de Dashboard Isolado por Perfil (Tarefa 5)
 
-- **Script SQL de Migração:** Localizado em `supabase_rls_policies.sql`.
-- **Regras Principais:**
-  1. **Tabela `estoques`:** Gerente acessa as 5 filiais. Funcionário acessa exclusivamente `filial_id = get_auth_user_filial_id()`.
-  2. **Tabela `pedidos_compra` / `itens_pedido_compra`:** Criação permitida apenas para `cargo = 'gerente'`.
-  3. **Tabela `transferencias`:** Funcionário só pode criar transferências tendo sua filial como origem.
-  4. **Tabela `usuarios`:** Impedida a alteração de `cargo` ou `filial_id` por usuários comuns.
+- **Funcionário:** As consultas do Dashboard (`estoques`, `transferencias`, `movimentacoes`) enviam a cláusula `.eq('filial_id', usuario.filial_id)` diretamente para a API REST do Supabase. O gráfico "Estoque por Filial" exibe unicamente a barra da filial autorizada (ex: Filial Centro).
+- **Gerente:** Mantém visão consolidada de todas as 5 filiais com a barra comparativa e opção de alternar a visualização por filial específica.
 
 ---
 

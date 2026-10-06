@@ -4,8 +4,8 @@
    ===================================================================== */
 
 // ---------- CONFIGURAÇÃO DA API E BASE DADOS DEMO/STATIC ----------
-const IS_LOCAL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-const API_BASE_URL = IS_LOCAL ? 'http://localhost:8080/api' : '/api';
+const IS_LOCAL = false;
+const API_BASE_URL = '';
 
 // Usuários válidos para fallback no GitHub Pages / frontend estático
 const MOCK_USUARIOS = [
@@ -900,14 +900,12 @@ function mostrarLoading(el){
 
 // ---------- LOGIN ----------
 async function fazerLogin(){
-  const nomeInput = $('login-nome');
   const emailInput = $('login-email');
   const senhaInput = $('login-senha');
-  const nome = nomeInput ? nomeInput.value.trim() : '';
   const email = emailInput ? emailInput.value.trim() : '';
   const senha = senhaInput ? senhaInput.value : '';
 
-  if(!nome || !email || !senha){ toast('Nome, e-mail e senha são obrigatórios.', true); return; }
+  if(!email || !senha){ toast('E-mail e senha são obrigatórios.', true); return; }
 
   try {
     let resposta = null;
@@ -932,7 +930,7 @@ async function fazerLogin(){
           const cargo = (u.cargo || u.tipo || authData.user.user_metadata?.cargo || 'funcionario').toLowerCase();
           resposta = {
             id: u.id || authData.user.id,
-            nome: u.nome || authData.user.user_metadata?.nome || nome,
+            nome: u.nome || authData.user.user_metadata?.nome || email.split('@')[0],
             email: email,
             cargo: cargo,
             tipo: cargo,
@@ -956,7 +954,6 @@ async function fazerLogin(){
 
       if (!error && data && data.length > 0) {
         const u = data[0];
-        const nomeValido = u.nome && u.nome.trim().toLowerCase() === nome.toLowerCase();
 
         // Validação segura de BCrypt via biblioteca dcodeIO/bcryptjs
         let senhaValida = false;
@@ -965,11 +962,11 @@ async function fazerLogin(){
           senhaValida = bcryptLib.compareSync(senha, u.senha);
         }
 
-        if (nomeValido && senhaValida) {
+        if (senhaValida) {
           const cargo = (u.cargo || u.tipo || 'funcionario').toLowerCase();
           resposta = {
             id: u.id,
-            nome: u.nome,
+            nome: u.nome || email.split('@')[0],
             email: u.email,
             cargo: cargo,
             tipo: cargo,
@@ -989,7 +986,7 @@ async function fazerLogin(){
     }
 
     if (!resposta) {
-      throw new Error('Acesso negado. Nome, e-mail ou senha incorretos.');
+      throw new Error('Acesso negado. E-mail ou senha incorretos.');
     }
 
     aplicarLogin(resposta);
@@ -1000,8 +997,7 @@ async function fazerLogin(){
 
 // Atalho para testar o layout sem o backend rodando ainda.
 function simularLogin(tipo){
-  const nomeInput = $('login-nome') ? $('login-nome').value.trim() : '';
-  const nome = nomeInput || (tipo === 'gerente' ? 'Gerente' : 'Funcionário');
+  const nome = (tipo === 'gerente' ? 'Gerente' : 'Funcionário');
   aplicarLogin(tipo === 'gerente'
     ? {nome, tipo:'gerente', cargo:'gerente', filial_id:null}
     : {nome, tipo:'funcionario', cargo:'funcionario', filial_id:1});

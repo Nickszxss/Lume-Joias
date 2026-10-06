@@ -7,41 +7,62 @@ GitHub Pages:
 https://nickszxss.github.io/Lume-Joias/
 ```
 
-- **Arquitetura Real:** SPA Estática Client-Side (HTML5, CSS3, JavaScript Vanilla ES6+) hospedada no GitHub Pages comunicando-se diretamente com o Supabase PostgreSQL via SDK / REST API pública.
-- **Backend Java/Spring Boot:** Suprimido do fluxo de execução em produção; todas as operações ocorrem diretamente no cliente com Supabase.
+- **Arquitetura Oficial:**
+  ```text
+  Frontend:
+  HTML + CSS + JavaScript
+
+  Hospedagem:
+  GitHub Pages
+
+  Backend/BaaS:
+  Supabase
+
+  Banco de dados:
+  PostgreSQL / Supabase
+  ```
+- **Execução Serverless:** A aplicação é 100% estática client-side (HTML5, CSS3, JavaScript Vanilla ES6+) hospedada no GitHub Pages comunicando-se diretamente com o Supabase PostgreSQL via SDK / REST API pública. Não existe dependência ou execução de servidor backend Java/Spring Boot.
 
 ---
 
-## 2. Dados de Usuários e Autenticação (Aprovado — Tarefa 2)
+## 2. Autenticação e Usuários de Teste
 
-Os usuários abaixo estão cadastrados na tabela `usuarios` do Supabase com senhas em hash BCrypt (`etec2026@DS`) e autenticados de forma segura via integração dual: Supabase Auth (`signInWithPassword`) e validação de hash BCrypt client-side via `bcryptjs` (sem comparação em texto claro e sem exposição de `service_role`):
+A autenticação é realizada solicitando exclusivamente:
+```text
+E-mail + Senha
+```
+O campo Nome do Usuário não é exigido no formulário de login. O nome do perfil do usuário é recuperado após a autenticação e utilizado para exibição no sistema, dashboard, relatórios e auditoria de movimentações.
+
+Os usuários ativos cadastrados no Supabase (`public.usuarios` e Supabase Auth com senhas em hash BCrypt):
 
 | Nome     | E-mail                        | Senha       | Cargo       | Permissões / Filial | Status Autenticação |
 | -------- | ----------------------------- | ----------- | ----------- | ------------------- | ------------------- |
-| Anderson | `anderson.func@empresa.com`   | etec2026@DS | Funcionário | Filial Centro (ID 1) | Aprovado (Testado) |
-| Robson   | `robson.grt@empresa.com`      | etec2026@DS | Gerente     | Acesso Geral (5 Filiais) | Aprovado (Testado) |
-| Isabella | `isabella.func@empresa.com`   | etec2026@DS | Funcionário | Filial Norte (ID 2) | Aprovado (Testado) |
-| Manuella | `manuella.grt@empresa.com`    | etec2026@DS | Gerente     | Acesso Geral (5 Filiais) | Aprovado (Testado) |
+| Anderson | `anderson.func@empresa.com`   | etec2026@DS | Funcionário | Filial Centro (ID 1) | Homologado |
+| Robson   | `robson.grt@empresa.com`      | etec2026@DS | Gerente     | Acesso Geral (5 Filiais) | Homologado |
+| Isabella | `isabella.func@empresa.com`   | etec2026@DS | Funcionário | Filial Norte (ID 2) | Homologado |
+| Manuella | `manuella.grt@empresa.com`    | etec2026@DS | Gerente     | Acesso Geral (5 Filiais) | Homologado |
+| Nicoly   | `nicoly.func@empresa.com`     | 160611      | Funcionária | Filial Norte (ID 2) | Homologado |
+| Nicoly   | `nicoly.grt@empresa.com`      | 160611      | Gerente     | Filial Leste (ID 4 / 5 Filiais) | Homologado |
 
 ---
 
 ## 3. Matriz de Homologação e Diagnóstico por Módulo
 
-| Módulo / Funcionalidade | Status da Auditoria | Diagnóstico Técnico & Implementação |
+| Módulo / Funcionalidade | Status | Detalhamento Técnico |
 | :--- | :--- | :--- |
-| **Autenticação / Login** | **APROVADO** | Integrado ao Supabase Auth + validação de hash BCrypt via `bcryptjs`. Testes de login, senha incorreta, F5 e logout validados. |
-| **Pedidos de Compra** | **APROVADO** | Corrigida a integração relacional master-detail (`pedidos_compra` + `itens_pedido_compra`) com rollback e bloqueio de permissão para funcionários. |
-| **Segurança & RLS** | **APROVADO** | Políticas RLS projetadas em `supabase_rls_policies.sql`. Consultas do frontend ajustadas para enviar filtros de filial e proibir vazamentos. |
-| **Dashboard** | **APROVADO** | Consultas e gráficos isolados estritamente no nível da query HTTP por `filial_id` para funcionários. Gerente mantém visão consolidada de 5 filiais. |
-| **Estoque / Ajustes** | Operacional | Leitura e ajuste manual atualizando estoque e criando registros em `movimentacoes`. |
-| **Transferências** | Operacional | Validação de saldo de origem, atualização atômica e registro duplo no histórico. |
-| **Histórico / Audit** | Operacional | Exibição de movimentações vinculadas aos nomes reais de usuários e filiais. |
-| **Design / Tema** | Operacional | Alternância entre Modo Claro (rose `#9d3b5c`) e Escuro (`#c65b7e`) funcional. |
-| **Responsividade** | **APROVADO** | Testado e homologado em 375px, 390px, 768px (portrait/landscape) e Desktop, nos temas Claro e Escuro sem rolagem indesejada na página. |
+| **Autenticação / Login** | **APROVADO** | Formulário e fluxo de autenticação solicitam apenas E-mail e Senha. Integrado ao Supabase Auth + BCrypt. |
+| **Pedidos de Compra** | **APROVADO** | Estrutura relacional master-detail (`pedidos_compra` + `itens_pedido_compra`) com rollback e permissão restrita a Gerentes. |
+| **Segurança & RLS** | **APROVADO** | Políticas RLS e filtros no cliente garantem isolamento rigoroso por filial para funcionários. |
+| **Dashboard** | **APROVADO** | Consultas e gráficos isolados por `filial_id` para funcionários. Visão geral consolidada das 5 filiais para gerentes. |
+| **Estoque / Ajustes** | **APROVADO** | Atualização direta na tabela `estoques` gerando histórico auditável em `movimentacoes`. |
+| **Transferências** | **APROVADO** | Validação de saldo de origem, atualização atômica para 'concluida' e registro duplo no histórico. |
+| **Histórico / Audit** | **APROVADO** | Exibição em tempo real de movimentações com identificação de usuário e filial. |
+| **Design / Tema** | **APROVADO** | Alternância dinâmica entre Modo Claro (rose `#9d3b5c`) e Modo Escuro (`#c65b7e`). |
+| **Responsividade** | **APROVADO** | Homologado em smartphones, tablets e desktop sem barra de rolagem horizontal indesejada. |
 
 ---
 
-## 4. Especificações de Responsividade e Breakpoints (Tarefa 6)
+## 4. Especificações de Responsividade e Breakpoints
 
 - **Breakpoints Principais:**
   - `@media (max-width: 900px)`: Transição de sidebar para cabeçalho superior fixo com navegação em barra de pílulas horizontais (`#menu`) com rolagem suave.
@@ -50,7 +71,7 @@ Os usuários abaixo estão cadastrados na tabela `usuarios` do Supabase com senh
 
 ---
 
-## 5. Schema Real do Banco de Dados Supabase (Confirmado)
+## 5. Schema Real do Banco de Dados Supabase
 
 - `usuarios`: `id`, `nome`, `email`, `senha` (BCrypt), `cargo`, `tipo`, `filial_id`, `ativo`, `created_at`
 - `filiais`: `id`, `nome`, `endereco`, `cidade`, `estado`, `ativa`, `created_at`

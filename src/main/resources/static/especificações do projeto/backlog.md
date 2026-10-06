@@ -1,21 +1,20 @@
-# Backlog do Projeto — Sistema de Gerenciamento de Estoque (SGE)
+# Backlog do Projeto — Sistema de Gerenciamento de Estoque (SGE) Lume Joias
 
-## Sprint 1 — Estrutura Base e Autenticação
-- [x] Configuração inicial do Spring Boot
-- [x] Criação do front-end SPA
-- [x] Autenticação de login com Nome, E-mail e Senha no backend Spring Boot
-- [x] Conexão com Supabase PostgreSQL
+## Arquitetura Serverless
+- [x] Front-end SPA (HTML + CSS + JavaScript) hospedado no GitHub Pages
+- [x] Conexão direta client-side com Supabase (PostgreSQL / Supabase Auth)
+- [x] Eliminação do backend Java/Spring Boot e servidor local
 
-## Sprint 2 — Gestão de Produtos e Estoque
-- [x] Cadastro e listagem de produtos
+## Autenticação e Segurança
+- [x] Login exclusivo via E-mail + Senha (sem exigência de campo de Nome no login)
+- [x] Suporte a BCrypt e Supabase Auth (`signInWithPassword`)
+- [x] Cadastro de contas ativas: Anderson, Robson, Isabella, Manuella, Nicoly Funcionária (`nicoly.func@empresa.com`) e Nicoly Gerente (`nicoly.grt@empresa.com`)
+- [x] Validação de permissões e isolamento por filial via RLS
+
+## Gestão de Produtos, Estoque e Operações
+- [x] Cadastro e listagem de produtos no Supabase
 - [x] Ajuste manual de estoque (entrada/saída)
 - [x] Alertas visuais para estoque baixo/zerado
-
-## Sprint 3 — Movimentações Avançadas
 - [x] Solicitação e conclusão de transferências entre filiais
-- [x] Pedidos de compra por parte do gerente
+- [x] Pedidos de compra (1:N relacional `pedidos_compra` + `itens_pedido_compra`)
 - [x] Histórico auditável de movimentações
-
-## Futuro / Não Implementado
-- [ ] Exportação de relatórios em PDF/Excel
-- [ ] Notificações push/email para estoque crítico

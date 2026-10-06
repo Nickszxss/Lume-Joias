@@ -1,38 +1,74 @@
-# Especificação Técnica — Sistema de Gerenciamento de Estoque
+# ESPECIFICAÇÃO TÉCNICA — LUME JOIAS
 
-> **Versão:** 2.6 (Pós-Tarefa 6: Ajustes Responsivos)
-> **Data:** 05/10/2026
-> **Arquitetura Target:** SPA Estática (HTML5 / CSS3 / JavaScript Vanilla) + Supabase (PostgreSQL / RPC) + GitHub Pages
+## 1. Arquitetura da Aplicação
+
+O **Lume Joias** é um Sistema de Gerenciamento de Estoque (SGE) multi-filial projetado para operar com arquitetura 100% serverless:
+
+```text
+Frontend:
+HTML + CSS + JavaScript (Vanilla ES6+)
+
+Hospedagem:
+GitHub Pages
+
+Backend / BaaS:
+Supabase
+
+Banco de Dados:
+PostgreSQL / Supabase
+```
 
 ---
 
-## 1. Visão Geral e Estado Atual
+## 2. Autenticação
 
-Esta especificação técnica reflete a conclusão da **Tarefa 6 (Ajustes Responsivos do Lume Joias)**.
+A autenticação é realizada diretamente no Supabase utilizando o fluxo:
 
-| Componente | Especificação Projetada | Estado Atual Implementado | Status |
-|------------|-------------------------|---------------------------|--------|
-| **Arquitetura** | SPA Cliente-Servidor (GitHub Pages + Supabase) | GitHub Pages + Supabase Direct | **Concluído** |
-| **Autenticação** | Supabase Auth + BCrypt hash verification (`bcryptjs`) | `signInWithPassword` + `bcryptjs.compareSync` | **Concluído** |
-| **Pedidos de Compra** | Inserção e Leitura Relacional Master-Detail | `pedidos_compra` + `itens_pedido_compra` com rollback | **Concluído** |
-| **Políticas RLS** | Habilitação e Políticas Granulares no PostgreSQL | `supabase_rls_policies.sql` | **Concluído** |
-| **Escopo / Dashboard** | Isolamento por `filial_id` para funcionário | Queries filtradas no client (REST) e restrições RLS | **Concluído** |
-| **Responsividade** | Support a 375px, 390px, 768px, Tablet e Desktop | Breakpoints otimizados, modais scroll em 88vh, sem overflow do body | **Concluído** |
+```text
+E-mail + Senha
+       ↓
+Supabase Auth / public.usuarios
+       ↓
+Sessão Autenticada
+```
+
+- **Sem campo de nome no login:** O formulário exige exclusivamente E-mail e Senha.
+- **Identificação:** O nome do usuário permanece registrado no perfil Supabase e é exibido na interface e relatórios após a autenticação.
 
 ---
 
-## 2. Resoluções Homologadas e Comportamento Visual
+## 3. Perfis e Permissões de Usuários
 
-- **Smartphone 375px & 390px (e.g. iPhone SE / 12 / 13 / 14):**
-  - Sidebar oculta e transformada em top bar fixa grid (`.logo`, `.theme-toggle-container`, `.user-box`).
-  - Menu de navegação pill horizontal com scroll suave tátil.
-  - Modais com `max-height: 88vh; overflow-y: auto` e botões empilhados verticalmente.
-  - Tabelas contidas em cards com `overflow-x: auto` e aviso visual *"← Deslize para ver mais →"*.
-  - `body { overflow-x: hidden; }` impedindo rolagem lateral indesejada da página.
+### Gerente
+- Visão consolidada do estoque das 5 filiais no Dashboard.
+- Permissão para criar novos Pedidos de Compra (`#btn-novo-pedido`).
+- Solicitação e conclusão de transferências entre quaisquer filiais.
 
-- **Tablet 768px (Portrait) & 1024px (Landscape):**
-  - Transição fluida de visualização em 2 colunas para 1 coluna nos gráficos e cards do Dashboard.
-  - Navegação tátil responsiva em abas no menu superior.
+### Funcionário
+- Visão restrita e isolada do estoque de sua filial atribuída (`filial_id`).
+- Origem de transferência travada na sua própria filial.
+- Sem permissão para criar Pedidos de Compra.
 
-- **Desktop (1366px+):**
-  - Sidebar lateral fixa de 250px mantida.
+### Usuários de Teste
+
+| Nome     | E-mail                        | Senha       | Cargo       | Filial Atribuída |
+| -------- | ----------------------------- | ----------- | ----------- | ---------------- |
+| Anderson | `anderson.func@empresa.com`   | etec2026@DS | Funcionário | Filial Centro (ID 1) |
+| Robson   | `robson.grt@empresa.com`      | etec2026@DS | Gerente     | Geral (5 Filiais) |
+| Isabella | `isabella.func@empresa.com`   | etec2026@DS | Funcionário | Filial Norte (ID 2) |
+| Manuella | `manuella.grt@empresa.com`    | etec2026@DS | Gerente     | Geral (5 Filiais) |
+| Nicoly   | `nicoly.func@empresa.com`     | 160611      | Funcionária | Filial Norte (ID 2) |
+| Nicoly   | `nicoly.grt@empresa.com`      | 160611      | Gerente     | Filial Leste (ID 4) / Geral |
+
+---
+
+## 4. Estrutura do Banco de Dados (Supabase PostgreSQL)
+
+- `usuarios`: `id`, `nome`, `email`, `senha`, `cargo`, `tipo`, `filial_id`, `ativo`
+- `filiais`: `id`, `nome`, `endereco`, `cidade`, `estado`, `ativa`
+- `produtos`: `id`, `nome`, `descricao`, `codigo`, `unidade_medida`, `qtd_minima`, `ativo`
+- `estoques`: `id`, `filial_id`, `produto_id`, `quantidade`, `status`
+- `movimentacoes`: `id`, `produto_id`, `filial_id`, `usuario_id`, `tipo`, `quantidade`, `quantidade_anterior`, `quantidade_nova`, `motivo`
+- `transferencias`: `id`, `origem_id`, `destino_id`, `produto_id`, `usuario_id`, `quantidade`, `status`
+- `pedidos_compra`: `id`, `filial_id`, `usuario_id`, `status`
+- `itens_pedido_compra`: `id`, `pedido_id`, `produto_id`, `quantidade`

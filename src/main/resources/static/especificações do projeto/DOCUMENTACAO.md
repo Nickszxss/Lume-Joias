@@ -58,6 +58,10 @@ Os usuários ativos cadastrados no Supabase (`public.usuarios` e Supabase Auth c
 | **Transferências** | **APROVADO** | Validação de saldo de origem, atualização atômica para 'concluida' e registro duplo no histórico. |
 | **Histórico / Audit** | **APROVADO** | Exibição em tempo real de movimentações com identificação de usuário e filial. |
 | **Design / Tema** | **APROVADO** | Alternância dinâmica entre Modo Claro (rose `#9d3b5c`) e Modo Escuro (`#c65b7e`). |
+| **Cadastro de Produtos por Filial** | **APROVADO** | Seleção obrigatória de Filial (`#p-filial`) associando o produto/estoque estritamente à filial escolhida. |
+| **Preenchimento Automático do SKU** | **APROVADO** | Tabela oficial de SKUs (001 a 009 com zeros à esquerda) preenchida e atualizada automaticamente conforme o tipo de produto selecionado. |
+| **Filtro de Filiais no Estoque** | **APROVADO** | Filtro funcional por botões ("Todas" e Filiais 1 a 5) na tela de estoque com coluna de Filial dedicada e filtragem reativa. |
+| **Limpeza de Produtos e Preservação de Usuários** | **APROVADO** | Exclusão completa dos produtos legados e estoque inicial, mantendo 100% dos usuários (6 contas) e 5 filiais ativas. |
 | **Responsividade** | **APROVADO** | Homologado em smartphones, tablets e desktop sem barra de rolagem horizontal indesejada. |
 
 ---

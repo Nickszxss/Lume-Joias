@@ -46,8 +46,30 @@ Sessão Autenticada
 
 ### Funcionário
 - Visão restrita e isolada do estoque de sua filial atribuída (`filial_id`).
-- Origem de transferência travada na sua própria filial.
+- Origem de transferência e seleção de filial no cadastro de produto travadas na sua própria filial.
 - Sem permissão para criar Pedidos de Compra.
+
+### Reset de Produtos e Preservação da Estrutura de Usuários
+- Todos os registros legados de produtos, estoques iniciais, movimentações e transferências operacionais foram removidos.
+- A estrutura de autenticação (`usuarios`), todas as 6 contas de usuários (gerentes e funcionários) e as 5 filiais oficiais foram integralmente preservadas.
+
+### Filtro de Filiais na Tela de Estoque
+- O filtro de estoque permite alternar entre "Todas as filiais" e as 5 filiais individuais (Centro, Norte, Sul, Leste, Oeste).
+- A tabela de estoque exibe a coluna dedicada `Filial` e atualiza reativamente os dados consultando a API do Supabase com o parâmetro `.eq('filial_id', filialId)`.
+
+### Tabela Oficial de SKUs e Regras de Cadastro por Filial
+- O cadastro de produtos exige a escolha obrigatória de uma filial (`filial_id`).
+- O produto criado é associado exclusivamente à filial selecionada (registro único na tabela `estoques`), não sendo propagado automaticamente para as demais filiais.
+- O SKU é preenchido e atualizado automaticamente com preservação dos zeros à esquerda de acordo com o tipo de produto selecionado:
+  - Colar de prata → `001`
+  - Colar de ouro → `002`
+  - Anel de prata → `003`
+  - Anel de ouro → `004`
+  - Brinco de prata → `005`
+  - Brinco de ouro → `006`
+  - Solitária → `007`
+  - Pulseira de prata → `008`
+  - Pulseira de ouro → `009`
 
 ### Usuários de Teste
 

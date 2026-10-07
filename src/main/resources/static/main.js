@@ -959,14 +959,6 @@ async function fazerLogin(){
             filial_id: u.filial_id ?? (cargo === 'gerente' ? null : 1)
           };
 
-          // Auto-provisionar no Supabase Auth para habilitar sessões JWT nativas futuramente
-          if (client.auth) {
-            client.auth.signUp({
-              email: email,
-              password: senha,
-              options: { data: { nome: u.nome, cargo: cargo, filial_id: u.filial_id } }
-            }).catch(() => {});
-          }
         }
       }
     }

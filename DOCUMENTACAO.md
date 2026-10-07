@@ -21,7 +21,7 @@ https://nickszxss.github.io/Lume-Joias/
   Banco de dados:
   PostgreSQL / Supabase
   ```
-- **Execução Serverless:** A aplicação é 100% estática client-side (HTML5, CSS3, JavaScript Vanilla ES6+) hospedada no GitHub Pages comunicando-se diretamente com o Supabase PostgreSQL via SDK / REST API pública. Não existe dependência ou execução de servidor backend Java/Spring Boot.
+- **Execução Serverless:** A aplicação é 100% estática client-side (HTML5, CSS3, JavaScript Vanilla ES6+) hospedada no GitHub Pages comunicando-se diretamente com o Supabase PostgreSQL via SDK / REST API pública.
 
 ---
 

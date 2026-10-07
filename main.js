@@ -24,31 +24,11 @@ let mockFiliais = [
   { id: 5, nome: 'Filial Oeste' }
 ];
 
-let mockProdutos = [
-  { id: 1, sku: 'JOIA-001', nome: 'Anel de Ouro 18k', categoria: 'Aneis', qtd_minima: 5 },
-  { id: 2, sku: 'JOIA-002', nome: 'Colar de Prata 925', categoria: 'Colares', qtd_minima: 10 },
-  { id: 3, sku: 'JOIA-003', nome: 'Brinco de Diamante', categoria: 'Brincos', qtd_minima: 3 }
-];
-
-let mockEstoques = [
-  { produto_id: 1, filial_id: 1, quantidade: 12, status: 'suficiente' },
-  { produto_id: 1, filial_id: 2, quantidade: 2, status: 'baixo' },
-  { produto_id: 2, filial_id: 1, quantidade: 15, status: 'suficiente' },
-  { produto_id: 2, filial_id: 2, quantidade: 0, status: 'zerado' },
-  { produto_id: 3, filial_id: 1, quantidade: 1, status: 'baixo' }
-];
-
-let mockTransferencias = [
-  { id: 1, produto_id: 1, produtoNome: 'Anel de Ouro 18k', origem_id: 1, origemNome: 'Filial Centro', destino_id: 2, destinoNome: 'Filial Norte', quantidade: 2, solicitante: 'Anderson', data: new Date().toLocaleDateString('pt-BR'), status: 'pendente' }
-];
-
-let mockPedidos = [
-  { id: 1, produto_id: 2, produtoNome: 'Colar de Prata 925', quantidade: 20, filial_id: 2, filialNome: 'Filial Norte', solicitante: 'Robson', data: new Date().toLocaleDateString('pt-BR'), status: 'solicitado' }
-];
-
-let mockMovimentacoes = [
-  { data: new Date().toLocaleString('pt-BR'), produto_id: 1, produtoNome: 'Anel de Ouro 18k', filial_id: 1, filialNome: 'Filial Centro', tipo: 'entrada', anterior: 10, nova: 12, usuario: 'Anderson', motivo: 'Carga inicial de estoque' }
-];
+let mockProdutos = [];
+let mockEstoques = [];
+let mockTransferencias = [];
+let mockPedidos = [];
+let mockMovimentacoes = [];
 
 // Wrapper único de fetch: centraliza headers, tratamento de erro, JSON e fallback local para GitHub Pages.
 async function apiRequest(path, options = {}) {
@@ -237,7 +217,7 @@ const api = {
       if (!error && data) {
         return data.map(p => ({
           id: p.id,
-          sku: p.sku || p.codigo || `JOIA-00${p.id}`,
+          sku: p.sku || p.codigo || obterSkuPorNome(p.nome),
           nome: p.nome,
           categoria: p.categoria || 'Geral',
           qtd_minima: p.qtd_minima ?? 0
@@ -250,7 +230,6 @@ const api = {
   criarProduto: async (dados) => {
     const client = getSupabaseClient();
     if (client) {
-      // Inserir produto na tabela produtos do Supabase
       const payloadProduto = {
         nome: dados.nome,
         codigo: dados.sku,
@@ -259,31 +238,36 @@ const api = {
         unidade_medida: 'unidade',
         ativo: true
       };
-      const { data: pData, error: pErr } = await client.from('produtos').insert([payloadProduto]).select().single();
-      if (!pErr && pData) {
-        const prodId = pData.id;
-        // Inserir registros de estoque inicial para as 5 filiais
-        const { data: listF } = await client.from('filiais').select('id');
-        const filiaisIds = (listF && listF.length > 0) ? listF.map(f => f.id) : [1, 2, 3, 4, 5];
-        const initialQtd = dados.qtd_inicial || 0;
-        const minQtd = dados.qtd_minima || 0;
-        const st = initialQtd === 0 ? 'zerado' : (initialQtd <= minQtd ? 'baixo' : 'suficiente');
+      try {
+        const { data: pData, error: pErr } = await client.from('produtos').insert([payloadProduto]).select().single();
+        if (!pErr && pData) {
+          const prodId = pData.id;
+          const targetFilialId = parseInt(dados.filialId);
+          const initialQtd = dados.qtd_inicial || 0;
+          const minQtd = dados.qtd_minima || 0;
+          const st = initialQtd === 0 ? 'zerado' : (initialQtd <= minQtd ? 'baixo' : 'suficiente');
 
-        const estoqueRecords = filiaisIds.map(fid => ({
-          produto_id: prodId,
-          filial_id: fid,
-          quantidade: initialQtd,
-          status: st
-        }));
-        await client.from('estoques').insert(estoqueRecords);
+          const estoqueRecord = {
+            produto_id: prodId,
+            filial_id: targetFilialId,
+            quantidade: initialQtd,
+            status: st
+          };
+          await client.from('estoques').insert([estoqueRecord]);
 
-        return {
-          id: prodId,
-          sku: dados.sku,
-          nome: dados.nome,
-          categoria: dados.categoria || 'Geral',
-          qtd_minima: dados.qtd_minima || 0
-        };
+          return {
+            id: prodId,
+            sku: dados.sku,
+            nome: dados.nome,
+            categoria: dados.categoria || 'Geral',
+            qtd_minima: dados.qtd_minima || 0,
+            filial_id: targetFilialId
+          };
+        } else if (pErr) {
+          return resolverMockLocal('/produtos', { method: 'POST', body: JSON.stringify(dados) });
+        }
+      } catch (err) {
+        return resolverMockLocal('/produtos', { method: 'POST', body: JSON.stringify(dados) });
       }
     }
     return apiRequest('/produtos', { method: 'POST', body: JSON.stringify(dados) });
@@ -296,7 +280,9 @@ const api = {
     const client = getSupabaseClient();
     if (client) {
       let query = client.from('estoques').select('*');
-      if (filialId) query = query.eq('filial_id', filialId);
+      if (filialId !== null && filialId !== undefined && filialId !== '') {
+        query = query.eq('filial_id', parseInt(filialId));
+      }
       const { data, error } = await query;
       if (!error && data) return data;
     }
@@ -1151,12 +1137,13 @@ function irPara(page){
 // ---------- FILTROS DE FILIAL ----------
 function montarFiltros(){
   const vis = filiaisVisiveis();
-  const html = vis.map(f=>`<button onclick="setFilialDash(${f.id},this)">${f.nome.replace('Filial ','')}</button>`).join('');
+  const dashHtml = vis.map(f=>`<button onclick="setFilialDash(${f.id},this)">${f.nome.replace('Filial ','')}</button>`).join('');
   const dashF = $('dash-filiais');
-  if (dashF) dashF.innerHTML = `<button class="on" onclick="setFilialDash(null,this)">${usuario.tipo==='gerente'?'Todas':'Minha filial'}</button>` + html;
+  if (dashF) dashF.innerHTML = `<button class="on" onclick="setFilialDash(null,this)">${usuario.tipo==='gerente'?'Todas':'Minha filial'}</button>` + dashHtml;
 
+  const estHtml = vis.map(f=>`<button onclick="setFilialEstoque(${f.id},this)">${f.nome.replace('Filial ','')}</button>`).join('');
   const estF = $('estoque-filiais');
-  if (estF) estF.innerHTML = `<button class="on" onclick="setFilialEstoque(null,this)">${usuario.tipo==='gerente'?'Todas':'Minha filial'}</button>` + html;
+  if (estF) estF.innerHTML = `<button class="on" onclick="setFilialEstoque(null,this)">${usuario.tipo==='gerente'?'Todas':'Minha filial'}</button>` + estHtml;
 
   const histF = $('hist-filial');
   if (histF) {
@@ -1318,9 +1305,52 @@ function pintarProdutos(){
     });
   tb.innerHTML = html || '<tr><td colspan="8" class="empty-state">Nenhum produto encontrado.</td></tr>';
 }
+const MAPA_SKU = {
+  'Colar de prata': '001',
+  'Colar de ouro': '002',
+  'Anel de prata': '003',
+  'Anel de ouro': '004',
+  'Brinco de prata': '005',
+  'Brinco de ouro': '006',
+  'Solitária': '007',
+  'Pulseira de prata': '008',
+  'Pulseira de ouro': '009'
+};
+
+function obterSkuPorNome(nome) {
+  if (!nome) return '001';
+  const nomeLower = nome.trim().toLowerCase();
+  for (const [key, val] of Object.entries(MAPA_SKU)) {
+    if (key.toLowerCase() === nomeLower) return val;
+  }
+  return '001';
+}
+
+function atualizarSkuPorTipo() {
+  const pNome = $('p-nome');
+  const pSku = $('p-sku');
+  if (pNome && pSku) {
+    const tipo = pNome.value;
+    pSku.value = obterSkuPorNome(tipo);
+  }
+}
+
 function renderProdutosFiltro(){ pintarProdutos(); } // usado nos oninput/onchange da tela
 
 function abrirModalProduto(){
+  const pf = $('p-filial');
+  if (pf) {
+    pf.innerHTML = FILIAIS.map(f => `<option value="${f.id}">${f.nome}</option>`).join('');
+    if (usuario && usuario.tipo === 'funcionario' && usuario.filial_id) {
+      pf.value = usuario.filial_id;
+      pf.disabled = true;
+    } else {
+      pf.disabled = false;
+    }
+  }
+
+  atualizarSkuPorTipo();
+
   const overlay = $('modal-overlay');
   const modalP = $('modal-produto');
   if (overlay) overlay.classList.add('active');
@@ -1331,13 +1361,15 @@ async function salvarProduto(){
   const nome = $('p-nome') ? $('p-nome').value.trim() : '';
   const sku = $('p-sku') ? $('p-sku').value.trim() : '';
   const categoria = $('p-cat') ? $('p-cat').value.trim() : '';
+  const filialId = parseInt($('p-filial') ? $('p-filial').value : 0);
   const qtd_minima = parseInt($('p-min') ? $('p-min').value : 0) || 0;
   const qtd_inicial = parseInt($('p-qtd') ? $('p-qtd').value : 0) || 0;
 
   if(!nome || !sku){ toast('Preencha Nome e SKU.', true); return; }
+  if(!filialId){ toast('Selecione uma filial obrigatória.', true); return; }
 
   try {
-    await api.criarProduto({ nome, sku, categoria, qtd_minima, qtd_inicial });
+    await api.criarProduto({ nome, sku, categoria, filialId, qtd_minima, qtd_inicial });
     fecharModal();
     toast('Produto adicionado com sucesso!');
     renderProdutos();
@@ -1355,7 +1387,7 @@ async function renderEstoque(){
     pintarEstoque();
   } catch (err) {
     const tb = $('tbody-estoque');
-    if (tb) tb.innerHTML = '<tr><td colspan="6" class="empty-state">Não foi possível carregar o estoque.</td></tr>';
+    if (tb) tb.innerHTML = '<tr><td colspan="7" class="empty-state">Não foi possível carregar o estoque.</td></tr>';
   }
 }
 
@@ -1363,17 +1395,25 @@ function pintarEstoque(){
   const tb = $('tbody-estoque');
   if (!tb) return;
 
-  if(estoques.length === 0){
-    tb.innerHTML = '<tr><td colspan="6" class="empty-state">Nenhum produto cadastrado ainda.</td></tr>';
+  let list = estoques;
+  if (usuario && usuario.tipo === 'funcionario' && usuario.filial_id) {
+    list = list.filter(e => e.filial_id == usuario.filial_id);
+  } else if (filialEstoqueSel) {
+    list = list.filter(e => e.filial_id == filialEstoqueSel);
+  }
+
+  if(list.length === 0){
+    tb.innerHTML = '<tr><td colspan="7" class="empty-state">Nenhum produto cadastrado ainda neste filtro.</td></tr>';
     return;
   }
-  tb.innerHTML = estoques.map(e => {
-    const p = produtos.find(prd => prd.id === e.produto_id) || {};
+  tb.innerHTML = list.map(e => {
+    const p = produtos.find(prd => String(prd.id) === String(e.produto_id)) || {};
     const st = e.status ?? statusEstoque(e.quantidade, p.qtd_minima);
     return `
       <tr>
         <td><code>${p.sku ?? '—'}</code></td>
         <td><b>${p.nome ?? '—'}</b></td>
+        <td>${nomeFilial(e.filial_id)}</td>
         <td>${e.quantidade}</td>
         <td>${p.qtd_minima ?? '—'}</td>
         <td><span class="badge ${st==='zerado'?'danger':st==='baixo'?'warn':'ok'}">${STATUS_LABEL[st]}</span></td>

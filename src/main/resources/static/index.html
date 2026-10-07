@@ -251,6 +251,7 @@
             <tr>
               <th>SKU</th>
               <th>Produto</th>
+              <th>Filial</th>
               <th>Quantidade</th>
               <th>Mínimo</th>
               <th>Status</th>
@@ -407,18 +408,33 @@
     <h3>Novo Produto</h3>
 
     <div class="field">
-      <label>Nome</label>
-      <input id="p-nome" placeholder="Nome do produto">
+      <label>Tipo / Nome do produto *</label>
+      <select id="p-nome" onchange="atualizarSkuPorTipo()">
+        <option value="Colar de prata">Colar de prata</option>
+        <option value="Colar de ouro">Colar de ouro</option>
+        <option value="Anel de prata">Anel de prata</option>
+        <option value="Anel de ouro">Anel de ouro</option>
+        <option value="Brinco de prata">Brinco de prata</option>
+        <option value="Brinco de ouro">Brinco de ouro</option>
+        <option value="Solitária">Solitária</option>
+        <option value="Pulseira de prata">Pulseira de prata</option>
+        <option value="Pulseira de ouro">Pulseira de ouro</option>
+      </select>
     </div>
 
     <div class="field">
       <label>Categoria</label>
-      <input id="p-cat" placeholder="Ex: Bebidas">
+      <input id="p-cat" placeholder="Ex: Joias">
     </div>
 
     <div class="field">
-      <label>SKU</label>
-      <input id="p-sku" placeholder="Ex: PRD-001">
+      <label>SKU (Preenchimento Automático)</label>
+      <input id="p-sku" placeholder="001" readonly style="background-color: var(--bg-body, #f4f4f5); cursor: not-allowed;">
+    </div>
+
+    <div class="field">
+      <label>Filial *</label>
+      <select id="p-filial"></select>
     </div>
 
     <div class="field">

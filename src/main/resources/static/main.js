@@ -123,10 +123,42 @@ function resolverMockLocal(path, options) {
       id: mockPedidos.length + 1,
       produto_id: body.produtoId, produtoNome: prd?.nome,
       quantidade: body.quantidade, filial_id: body.filialId, filialNome: fil?.nome,
-      solicitante: body.solicitante, data: new Date().toLocaleDateString('pt-BR'), status: 'solicitado'
+      solicitante: body.solicitante, data: new Date().toLocaleDateString('pt-BR'), status: 'aberto'
     };
     mockPedidos.unshift(novoP);
     return novoP;
+  }
+
+  if (path.includes('/pedidos/') && path.endsWith('/receber')) {
+    const id = path.split('/')[2];
+    const p = mockPedidos.find(item => item.id == id);
+    if (p) {
+      if (p.status === 'recebido') throw new Error('Este pedido de compra já foi marcado como recebido anteriormente.');
+      p.status = 'recebido';
+      let est = mockEstoques.find(e => e.produto_id == p.produto_id && e.filial_id == p.filial_id);
+      if (!est) {
+        est = { produto_id: p.produto_id, filial_id: p.filial_id, quantidade: 0, status: 'zerado' };
+        mockEstoques.push(est);
+      }
+      const ant = est.quantidade;
+      est.quantidade += p.quantidade;
+      const prd = mockProdutos.find(prdItem => prdItem.id == p.produto_id);
+      est.status = statusEstoque(est.quantidade, prd ? prd.qtd_minima : 0);
+
+      mockMovimentacoes.unshift({
+        data: new Date().toLocaleString('pt-BR'),
+        produto_id: p.produto_id,
+        produtoNome: prd ? prd.nome : 'Produto',
+        filial_id: p.filial_id,
+        filialNome: mockFiliais.find(f => f.id == p.filial_id)?.nome || 'Filial',
+        tipo: 'entrada',
+        anterior: ant,
+        nova: est.quantidade,
+        usuario: usuario ? usuario.nome : 'Usuário',
+        motivo: `Recebimento do Pedido de Compra #${p.id}`
+      });
+    }
+    return p;
   }
 
   if (path === '/estoque/alertas' && method === 'GET') {
@@ -603,6 +635,99 @@ const api = {
       };
     }
     return apiRequest('/pedidos', { method: 'POST', body: JSON.stringify(dados) });
+  },
+
+  receberPedido: async (id) => {
+    const client = getSupabaseClient();
+    if (client) {
+      // 1. Buscar dados do pedido de compra
+      const { data: pedido, error: pErr } = await client.from('pedidos_compra').select('*').eq('id', id).single();
+      if (pErr || !pedido) {
+        throw new Error('Pedido de compra não encontrado.');
+      }
+
+      if (pedido.status === 'recebido') {
+        throw new Error('Este pedido de compra já foi marcado como recebido anteriormente.');
+      }
+
+      if (usuario && usuario.tipo === 'funcionario' && usuario.filial_id && String(pedido.filial_id) !== String(usuario.filial_id)) {
+        throw new Error('Acesso negado: Você só pode receber pedidos da sua própria filial.');
+      }
+
+      // 2. Buscar itens do pedido na tabela itens_pedido_compra
+      const { data: itens } = await client.from('itens_pedido_compra').select('*').eq('pedido_id', id);
+
+      const dataHora = new Date().toISOString();
+      const usrId = usuario ? usuario.id : null;
+
+      // 3. Atualizar status do pedido para 'recebido' de forma atômica
+      const { error: updateErr } = await client
+        .from('pedidos_compra')
+        .update({
+          status: 'recebido',
+          recebido_at: dataHora
+        })
+        .eq('id', id)
+        .neq('status', 'recebido');
+
+      if (updateErr) {
+        throw new Error('Não foi possível alterar o status do pedido (já recebido ou sem permissão).');
+      }
+
+      // 4. Se houver itens na tabela 'itens_pedido_compra', utilizar os itens. Caso contrário, utilizar os campos do pedido pai.
+      const listaItens = (itens && itens.length > 0) ? itens : [{ produto_id: pedido.produto_id, quantidade: pedido.quantidade }];
+
+      for (const item of listaItens) {
+        const prodId = item.produto_id;
+        const qtdRecebida = item.quantidade;
+        const filId = pedido.filial_id;
+
+        if (!prodId || !qtdRecebida) continue;
+
+        // Buscar estoque atual
+        const { data: curEst } = await client
+          .from('estoques')
+          .select('*')
+          .eq('produto_id', prodId)
+          .eq('filial_id', filId)
+          .single();
+
+        const antQtd = curEst ? curEst.quantidade : 0;
+        const novQtd = antQtd + qtdRecebida;
+
+        // Buscar produto para validar quantidade mínima
+        const { data: prd } = await client.from('produtos').select('*').eq('id', prodId).single();
+        const minQtd = prd ? (prd.qtd_minima || 0) : 0;
+        const st = novQtd === 0 ? 'zerado' : (novQtd <= minQtd ? 'baixo' : 'suficiente');
+
+        if (curEst) {
+          await client
+            .from('estoques')
+            .update({ quantidade: novQtd, status: st, updated_at: dataHora })
+            .eq('id', curEst.id);
+        } else {
+          await client
+            .from('estoques')
+            .insert([{ produto_id: prodId, filial_id: filId, quantidade: novQtd, status: st }]);
+        }
+
+        // Registrar movimentação de entrada no histórico
+        await client.from('movimentacoes').insert([{
+          produto_id: prodId,
+          filial_id: filId,
+          tipo: 'entrada',
+          quantidade: qtdRecebida,
+          quantidade_anterior: antQtd,
+          quantidade_nova: novQtd,
+          usuario_id: usrId,
+          motivo: `Recebimento do Pedido de Compra #${id}`,
+          created_at: dataHora
+        }]);
+      }
+
+      return { ...pedido, status: 'recebido', recebido_at: dataHora };
+    }
+    return apiRequest(`/pedidos/${id}/receber`, { method: 'POST' });
   },
 
   listarAlertas: async () => {
@@ -1517,7 +1642,7 @@ async function renderPedidos(){
     pintarPedidos();
   } catch (err) {
     const tb = $('tbody-pedidos');
-    if (tb) tb.innerHTML = '<tr><td colspan="7" class="empty-state">Não foi possível carregar os pedidos.</td></tr>';
+    if (tb) tb.innerHTML = '<tr><td colspan="8" class="empty-state">Não foi possível carregar os pedidos.</td></tr>';
   }
 }
 
@@ -1525,9 +1650,27 @@ function pintarPedidos(){
   const tb = $('tbody-pedidos');
   if (!tb) return;
 
-  tb.innerHTML = pedidos.length === 0
-    ? '<tr><td colspan="7" class="empty-state">Nenhum pedido de compra.</td></tr>'
-    : pedidos.map(p => `
+  if (pedidos.length === 0) {
+    tb.innerHTML = '<tr><td colspan="8" class="empty-state">Nenhum pedido de compra.</td></tr>';
+    return;
+  }
+
+  tb.innerHTML = pedidos.map(p => {
+    const isRecebido = p.status === 'recebido';
+    const statusBadgeClass = isRecebido ? 'ok' : 'info';
+
+    let acaoHtml = '—';
+    if (!isRecebido) {
+      const pFilialId = p.filial_id ?? p.filialId;
+      const podeReceber = usuario && (usuario.tipo === 'gerente' || String(pFilialId) === String(usuario.filial_id));
+      if (podeReceber) {
+        acaoHtml = `<button class="btn-sm btn-primary" onclick="receberPedido(${p.id}, this)">Marcar como Recebido</button>`;
+      } else {
+        acaoHtml = `<button class="btn-sm btn-secondary" disabled title="Apenas o gerente ou funcionário desta filial pode receber este pedido">Marcar como Recebido</button>`;
+      }
+    }
+
+    return `
       <tr>
         <td>#${p.id}</td>
         <td><b>${p.produtoNome ?? nomeProduto(p.produto_id)}</b></td>
@@ -1535,9 +1678,30 @@ function pintarPedidos(){
         <td>${p.filialNome ?? nomeFilial(p.filial_id)}</td>
         <td>${p.solicitante}</td>
         <td>${p.data}</td>
-        <td><span class="badge info">${p.status}</span></td>
+        <td><span class="badge ${statusBadgeClass}">${p.status}</span></td>
+        <td>${acaoHtml}</td>
       </tr>
-    `).join('');
+    `;
+  }).join('');
+}
+
+async function receberPedido(id, btn){
+  if (btn) {
+    if (btn.disabled) return;
+    btn.disabled = true;
+    btn.textContent = 'Processando...';
+  }
+  try {
+    await api.receberPedido(id);
+    toast('Pedido de compra marcado como recebido com sucesso!');
+    renderPedidos();
+  } catch (err) {
+    toast(err.message || 'Não foi possível receber o pedido de compra.', true);
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = 'Marcar como Recebido';
+    }
+  }
 }
 
 async function abrirModalPedido(){

@@ -70,7 +70,7 @@ Os usuários ativos cadastrados no Supabase (`public.usuarios` e Supabase Auth c
 | **Estoque / Ajustes** | **APROVADO** | Atualização direta na tabela `estoques` gerando histórico auditável em `movimentacoes`. |
 | **Transferências** | **APROVADO** | Validação de saldo de origem, conclusão restrita à filial de destino ou gerente, atualização atômica para 'concluida' e registro duplo no histórico. |
 | **Histórico / Audit** | **APROVADO** | Exibição em tempo real de movimentações com identificação de usuário e filial. |
-| **Design / Tema** | **APROVADO** | Alternância dinâmica entre Modo Claro (rose `#9d3b5c`) e Modo Escuro (`#c65b7e`). |
+| **Design / Tema** | **APROVADO** | Alternância dinâmica entre Modo Claro (rose `#9d3b5c`) e Modo Escuro (`#c65b7e`), com tipografia sans-serif limpa (Century Gothic / system-ui) e critérios de Definition of Done (DoD) com validação 100% serverless via GitHub Pages e Playwright. |
 | **Edição e Inativação de Produtos** | **APROVADO** | Permissão exclusiva para Gerentes editarem dados cadastrais (nome, SKU, categoria) e inativarem produtos (`ativo = false`) sem exclusão física do histórico/estoque. |
 | **Cadastro de Produtos por Filial** | **APROVADO** | Seleção obrigatória de Filial (`#p-filial`) associando o produto/estoque estritamente à filial escolhida. |
 | **Preenchimento Automático do SKU** | **APROVADO** | Tabela oficial de SKUs (001 a 009 com zeros à esquerda) preenchida e atualizada automaticamente conforme o tipo de produto selecionado. |

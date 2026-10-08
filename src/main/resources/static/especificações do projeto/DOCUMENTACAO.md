@@ -44,14 +44,18 @@ Os usuários ativos cadastrados no Supabase (`public.usuarios` e Supabase Auth c
 
 | Nome     | E-mail                        | Cargo       | Permissões / Filial | Status `public.usuarios` | Status `auth.users` |
 | -------- | ----------------------------- | ----------- | ------------------- | ------------------------ | ------------------- |
-| Anderson | `anderson.func@empresa.com`   | Funcionário | Filial Centro (ID 1) | Ativo (ID 4)             | Pendente            |
-| Robson   | `robson.grt@empresa.com`      | Gerente     | Filial Oeste (ID 5) / Acesso Geral | Ativo (ID 5)      | Pendente            |
-| Isabella | `isabella.func@empresa.com`   | Funcionária | Filial Norte (ID 2)  | Ativo (ID 6)             | Pendente            |
-| Manuella | `manuella.grt@empresa.com`    | Gerente     | Filial Leste (ID 4) / Acesso Geral | Ativo (ID 7)      | Pendente            |
-| Nicoly   | `nicoly.func@empresa.com`     | Funcionária | Filial Sul (ID 3)    | Ativo (ID 2)             | Pendente            |
-| Nicoly   | `nicoly.grt@empresa.com`      | Gerente     | Filial Sul (ID 3) / Acesso Geral   | Ativo (ID 3)      | Pendente            |
+| Anderson | `anderson.func@empresa.com`   | Funcionário | Filial Centro (ID 1) | Ativo (ID 4)             | Provisionado Admin  |
+| Robson   | `robson.grt@empresa.com`      | Gerente     | Filial Oeste (ID 5) / Acesso Geral | Ativo (ID 5)      | Provisionado Admin  |
+| Isabella | `isabella.func@empresa.com`   | Funcionária | Filial Norte (ID 2)  | Ativo (ID 6)             | Provisionado Admin  |
+| Manuella | `manuella.grt@empresa.com`    | Gerente     | Filial Leste (ID 4) / Acesso Geral | Ativo (ID 7)      | Provisionado Admin  |
+| Nicoly   | `nicoly.func@empresa.com`     | Funcionária | Filial Sul (ID 3)    | Ativo (ID 2)             | Provisionado Admin  |
+| Nicoly   | `nicoly.grt@empresa.com`      | Gerente     | Filial Sul (ID 3) / Acesso Geral   | Ativo (ID 3)      | Provisionado Admin  |
 
-*Nota: A criação dos usuários no Supabase Auth (`auth.users`) permanece pendente para execução em etapa posterior.*
+*Notas de Configuração:*
+- O Supabase Auth (`auth.users`) é responsável exclusivamente pela autenticação de credenciais da conta.
+- As seis contas são provisionadas administrativamente (via Painel Supabase Dashboard ou `migrar_usuarios_supabase.py` com `SUPABASE_SERVICE_ROLE_KEY` em ambiente seguro privado) com confirmação de e-mail ativada administrativamente (`email_confirm: true`).
+- A tabela `public.usuarios` permanece responsável por armazenar os dados complementares do funcionário (`nome`, `cargo`, `filial_id`, `ativo`).
+- O vínculo entre `auth.users` e `public.usuarios` será tratado na TAREFA 2.3.
 
 ---
 

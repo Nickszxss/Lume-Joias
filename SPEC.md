@@ -79,14 +79,18 @@ Sessão Autenticada
 
 | Nome     | E-mail                        | Cargo       | Filial Atribuída | Status `public.usuarios` | Status `auth.users` |
 | -------- | ----------------------------- | ----------- | ---------------- | ------------------------ | ------------------- |
-| Anderson | `anderson.func@empresa.com`   | Funcionário | Filial Centro (ID 1) | Ativo (ID 4)             | Pendente            |
-| Robson   | `robson.grt@empresa.com`      | Gerente     | Filial Oeste (ID 5)  | Ativo (ID 5)             | Pendente            |
-| Isabella | `isabella.func@empresa.com`   | Funcionária | Filial Norte (ID 2)  | Ativo (ID 6)             | Pendente            |
-| Manuella | `manuella.grt@empresa.com`    | Gerente     | Filial Leste (ID 4)  | Ativo (ID 7)             | Pendente            |
-| Nicoly   | `nicoly.func@empresa.com`     | Funcionária | Filial Sul (ID 3)    | Ativo (ID 2)             | Pendente            |
-| Nicoly   | `nicoly.grt@empresa.com`      | Gerente     | Filial Sul (ID 3)    | Ativo (ID 3)             | Pendente            |
+| Anderson | `anderson.func@empresa.com`   | Funcionário | Filial Centro (ID 1) | Ativo (ID 4)             | Provisionado Admin  |
+| Robson   | `robson.grt@empresa.com`      | Gerente     | Filial Oeste (ID 5)  | Ativo (ID 5)             | Provisionado Admin  |
+| Isabella | `isabella.func@empresa.com`   | Funcionária | Filial Norte (ID 2)  | Ativo (ID 6)             | Provisionado Admin  |
+| Manuella | `manuella.grt@empresa.com`    | Gerente     | Filial Leste (ID 4)  | Ativo (ID 7)             | Provisionado Admin  |
+| Nicoly   | `nicoly.func@empresa.com`     | Funcionária | Filial Sul (ID 3)    | Ativo (ID 2)             | Provisionado Admin  |
+| Nicoly   | `nicoly.grt@empresa.com`      | Gerente     | Filial Sul (ID 3)    | Ativo (ID 3)             | Provisionado Admin  |
 
-*Nota: A criação das contas no Supabase Auth (`auth.users`) permanece pendente para execução em etapa posterior.*
+*Notas de Configuração:*
+- As seis contas Auth foram instruídas para provisionamento administrativo seguro.
+- O Supabase Auth é o responsável pela autenticação e gestão de sessão de conta.
+- A tabela `public.usuarios` permanece responsável pelos dados complementares do funcionário.
+- O vínculo entre `auth.users` e `public.usuarios` será tratado na TAREFA 2.3.
 
 ---
 

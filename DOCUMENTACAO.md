@@ -68,7 +68,7 @@ Os usuários ativos cadastrados no Supabase (`public.usuarios` e Supabase Auth c
 | **Segurança & RLS** | **APROVADO** | Políticas RLS e filtros no cliente garantem isolamento rigoroso por filial para funcionários. |
 | **Dashboard** | **APROVADO** | Consultas e gráficos isolados por `filial_id` para funcionários. Visão geral consolidada das 5 filiais para gerentes. |
 | **Estoque / Ajustes** | **APROVADO** | Atualização direta na tabela `estoques` gerando histórico auditável em `movimentacoes`. |
-| **Transferências** | **APROVADO** | Validação de saldo de origem, atualização atômica para 'concluida' e registro duplo no histórico. |
+| **Transferências** | **APROVADO** | Validação de saldo de origem, conclusão restrita à filial de destino ou gerente, atualização atômica para 'concluida' e registro duplo no histórico. |
 | **Histórico / Audit** | **APROVADO** | Exibição em tempo real de movimentações com identificação de usuário e filial. |
 | **Design / Tema** | **APROVADO** | Alternância dinâmica entre Modo Claro (rose `#9d3b5c`) e Modo Escuro (`#c65b7e`). |
 | **Cadastro de Produtos por Filial** | **APROVADO** | Seleção obrigatória de Filial (`#p-filial`) associando o produto/estoque estritamente à filial escolhida. |

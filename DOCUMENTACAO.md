@@ -78,6 +78,7 @@ Os usuários ativos cadastrados no Supabase (`public.usuarios` e Supabase Auth c
 | **Limpeza de Produtos e Preservação de Usuários** | **APROVADO** | Exclusão completa dos produtos legados e estoque inicial, mantendo 100% dos usuários (6 contas) e 5 filiais ativas. |
 | **Responsividade** | **APROVADO** | Homologado em smartphones, tablets e desktop sem barra de rolagem horizontal indesejada. |
 | **Atualização em Tempo Real (Realtime)** | **APROVADO** | Escuta contínua via WebSocket Supabase Realtime (`sge_realtime_channel`) em `estoques`, `movimentacoes`, `transferencias` e `pedidos_compra` com atualização reativa automática das telas ativas sem F5. |
+| **Estoque Mínimo no Cadastro de Produto** | **APROVADO** | No cadastro de novos produtos, o antigo campo "Valor Inicial" foi substituído por "Estoque Mínimo", com opções de 10, 30 ou 50 unidades, servindo de parâmetro de referência para os alertas de estoque. |
 
 ---
 

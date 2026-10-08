@@ -90,8 +90,7 @@ async def run():
         # Cadastrar 'Brinco de ouro' (SKU 006) vinculado EXCLUSIVAMENTE à Filial Leste (ID 4)
         await page.select_option("#p-nome", value="Brinco de ouro")
         await page.select_option("#p-filial", value="4") # Filial Leste
-        await page.fill("#p-min", "2")
-        await page.fill("#p-qtd", "8")
+        await page.select_option("#p-min", value="10")
         await page.click("#modal-produto button:has-text('Salvar')")
         await page.wait_for_timeout(1000)
 

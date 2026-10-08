@@ -77,16 +77,16 @@ Sessão Autenticada
 
 ### Usuários de Teste
 
-| Nome     | E-mail                        | Cargo       | Filial Atribuída | Status `public.usuarios` | Status `auth.users` |
-| -------- | ----------------------------- | ----------- | ---------------- | ------------------------ | ------------------- |
-| Anderson | `anderson.func@empresa.com`   | Funcionário | Filial Centro (ID 1) | Ativo (ID 4)             | Provisionado Admin  |
-| Robson   | `robson.grt@empresa.com`      | Gerente     | Filial Oeste (ID 5)  | Ativo (ID 5)             | Provisionado Admin  |
-| Isabella | `isabella.func@empresa.com`   | Funcionária | Filial Norte (ID 2)  | Ativo (ID 6)             | Provisionado Admin  |
-| Manuella | `manuella.grt@empresa.com`    | Gerente     | Filial Leste (ID 4)  | Ativo (ID 7)             | Provisionado Admin  |
-| Nicoly   | `nicoly.func@empresa.com`     | Funcionária | Filial Sul (ID 3)    | Ativo (ID 2)             | Provisionado Admin  |
-| Nicoly   | `nicoly.grt@empresa.com`      | Gerente     | Filial Sul (ID 3)    | Ativo (ID 3)             | Provisionado Admin  |
+| Nome     | E-mail                        | Cargo       | Filial Atribuída | Escopo / Permissões | Pedidos de Compra |
+| -------- | ----------------------------- | ----------- | ---------------- | ------------------- | ----------------- |
+| Anderson | `anderson.func@empresa.com`   | Funcionário | Filial Centro (ID 1) | Restrito à Filial Centro | Bloqueado |
+| Robson   | `robson.grt@empresa.com`      | Gerente     | Filial Oeste (ID 5)  | Acesso Geral (5 Filiais) | Habilitado |
+| Isabella | `isabella.func@empresa.com`   | Funcionária | Filial Norte (ID 2)  | Restrito à Filial Norte  | Bloqueado |
+| Manuella | `manuella.grt@empresa.com`    | Gerente     | Filial Leste (ID 4)  | Acesso Geral (5 Filiais) | Habilitado |
+| Nicoly   | `nicoly.func@empresa.com`     | Funcionária | Filial Sul (ID 3)    | Restrito à Filial Sul    | Bloqueado |
+| Nicoly   | `nicoly.grt@empresa.com`      | Gerente     | Filial Sul (ID 3)    | Acesso Geral (5 Filiais) | Habilitado |
 
-*Notas de Autenticação Definitiva (Supabase Auth):*
+*Notas de Autenticação Definitiva e RLS:*
 - **Autenticação 100% Supabase Auth:** O fluxo de login depende exclusivamente de `supabase.auth.signInWithPassword({ email, password })`.
 - **Remoção do Fallback BCrypt:** O mecanismo de comparação local de hash BCrypt e a dependência da biblioteca `bcryptjs` foram integralmente removidos de `main.js` e `index.html`.
 - **Papel da Tabela `public.usuarios`:** A tabela `public.usuarios` funciona estritamente como perfil complementar (`nome`, `cargo`, `filial_id`, `ativo`). O campo `senha` não é consultado durante a autenticação.

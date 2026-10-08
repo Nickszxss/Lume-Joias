@@ -7,13 +7,6 @@
 const IS_LOCAL = false;
 const API_BASE_URL = '';
 
-// Usuários válidos para fallback no GitHub Pages / frontend estático
-const MOCK_USUARIOS = [
-  { id: 1, nome: 'Anderson', email: 'anderson.func@empresa.com', senha: 'etec2026@DS', cargo: 'funcionario', tipo: 'funcionario', filial_id: 1 },
-  { id: 2, nome: 'Robson', email: 'robson.grt@empresa.com', senha: 'etec2026@DS', cargo: 'gerente', tipo: 'gerente', filial_id: null },
-  { id: 3, nome: 'Isabella', email: 'isabella.func@empresa.com', senha: 'etec2026@DS', cargo: 'funcionario', tipo: 'funcionario', filial_id: 2 },
-  { id: 4, nome: 'Manuella', email: 'manuella.grt@empresa.com', senha: 'etec2026@DS', cargo: 'gerente', tipo: 'gerente', filial_id: null }
-];
 
 // Fallback de dados estáticos para simulação completa no GitHub Pages quando backend Java não estiver exposto publicamente
 let mockFiliais = [
@@ -56,16 +49,6 @@ async function apiRequest(path, options = {}) {
 function resolverMockLocal(path, options) {
   const method = (options.method || 'GET').toUpperCase();
   const body = options.body ? JSON.parse(options.body) : {};
-
-  if (path === '/auth/login' && method === 'POST') {
-    const usr = MOCK_USUARIOS.find(u =>
-      u.nome.toLowerCase() === (body.nome || '').trim().toLowerCase() &&
-      u.email.toLowerCase() === (body.email || '').trim().toLowerCase() &&
-      u.senha === body.senha
-    );
-    if (!usr) throw new Error('Credenciais inválidas.');
-    return { id: usr.id, nome: usr.nome, email: usr.email, cargo: usr.cargo, tipo: usr.tipo, filial_id: usr.filial_id, filialId: usr.filial_id };
-  }
 
   if (path === '/filiais' && method === 'GET') return mockFiliais;
   if (path === '/produtos' && method === 'GET') return mockProdutos;
@@ -894,78 +877,48 @@ async function fazerLogin(){
   if(!email || !senha){ toast('E-mail e senha são obrigatórios.', true); return; }
 
   try {
-    let resposta = null;
     const client = getSupabaseClient();
-
-    // 1. Tentar autenticação via Supabase Auth nativo (signInWithPassword)
-    if (client && client.auth) {
-      try {
-        const { data: authData, error: authErr } = await client.auth.signInWithPassword({
-          email: email,
-          password: senha
-        });
-
-        if (!authErr && authData && authData.user) {
-          const { data: uData } = await client
-            .from('usuarios')
-            .select('id, nome, email, cargo, tipo, filial_id')
-            .ilike('email', email)
-            .single();
-
-          const u = uData || {};
-          const cargo = (u.cargo || u.tipo || authData.user.user_metadata?.cargo || 'funcionario').toLowerCase();
-          resposta = {
-            id: u.id || authData.user.id,
-            nome: u.nome || authData.user.user_metadata?.nome || email.split('@')[0],
-            email: email,
-            cargo: cargo,
-            tipo: cargo,
-            filial_id: u.filial_id ?? (cargo === 'gerente' ? null : 1),
-            access_token: authData.session?.access_token
-          };
-        }
-      } catch (authException) {
-        console.warn('Supabase Auth signInWithPassword indisponível, tentando validação de perfil:', authException);
-      }
+    if (!client || !client.auth) {
+      throw new Error('Erro de comunicação com o Supabase.');
     }
 
-    // 2. Se a autenticação no Supabase Auth não retornar sessão, consultar public.usuarios
-    // e validar a senha usando hash BCrypt (sem comparação de texto claro).
-    if (!resposta && client) {
-      const { data, error } = await client
-        .from('usuarios')
-        .select('id, nome, email, senha, cargo, tipo, filial_id')
-        .ilike('email', email)
-        .limit(1);
+    // Autenticação exclusiva via Supabase Auth (signInWithPassword)
+    const { data: authData, error: authErr } = await client.auth.signInWithPassword({
+      email: email,
+      password: senha
+    });
 
-      if (!error && data && data.length > 0) {
-        const u = data[0];
-
-        // Validação segura de BCrypt via biblioteca dcodeIO/bcryptjs
-        let senhaValida = false;
-        const bcryptLib = (typeof dcodeIO !== 'undefined' && dcodeIO.bcrypt) ? dcodeIO.bcrypt : (typeof bcrypt !== 'undefined' ? bcrypt : null);
-        if (bcryptLib && typeof bcryptLib.compareSync === 'function') {
-          senhaValida = bcryptLib.compareSync(senha, u.senha);
-        }
-
-        if (senhaValida) {
-          const cargo = (u.cargo || u.tipo || 'funcionario').toLowerCase();
-          resposta = {
-            id: u.id,
-            nome: u.nome || email.split('@')[0],
-            email: u.email,
-            cargo: cargo,
-            tipo: cargo,
-            filial_id: u.filial_id ?? (cargo === 'gerente' ? null : 1)
-          };
-
-        }
-      }
-    }
-
-    if (!resposta) {
+    if (authErr || !authData || !authData.user) {
       throw new Error('Acesso negado. E-mail ou senha incorretos.');
     }
+
+    // Consulta do perfil do funcionário em public.usuarios (sem consultar ou validar campo senha)
+    const { data: uData, error: uErr } = await client
+      .from('usuarios')
+      .select('id, nome, email, cargo, tipo, filial_id, ativo')
+      .ilike('email', email)
+      .single();
+
+    if (uErr || !uData) {
+      await client.auth.signOut();
+      throw new Error('Acesso negado. Perfil de funcionário não localizado.');
+    }
+
+    if (uData.ativo === false) {
+      await client.auth.signOut();
+      throw new Error('Acesso negado. Usuário desativado.');
+    }
+
+    const cargo = (uData.cargo || uData.tipo || 'funcionario').toLowerCase();
+    const resposta = {
+      id: uData.id,
+      nome: uData.nome || email.split('@')[0],
+      email: uData.email,
+      cargo: cargo,
+      tipo: cargo,
+      filial_id: uData.filial_id ?? (cargo === 'gerente' ? null : 1),
+      access_token: authData.session?.access_token
+    };
 
     aplicarLogin(resposta);
   } catch (err) {

@@ -90,6 +90,13 @@ Sessão Autenticada
 - O filtro de estoque permite alternar entre "Todas as filiais" e as 5 filiais individuais (Centro, Norte, Sul, Leste, Oeste).
 - A tabela de estoque exibe a coluna dedicada `Filial` e atualiza reativamente os dados consultando a API do Supabase com o parâmetro `.eq('filial_id', filialId)`.
 
+### Cadastro de Produtos: Substituição do Valor Inicial por Estoque Mínimo
+- No cadastro de novos produtos, o antigo campo "Valor Inicial" foi substituído por "Estoque Mínimo", com opções de 10, 30 ou 50 unidades.
+- O valor selecionado é salvo na coluna `qtd_minima` da tabela `produtos` no Supabase PostgreSQL.
+- O estoque inicial do produto na filial selecionada é inicializado com 0 unidades (`quantidade = 0`, status `zerado`).
+- O parâmetro `qtd_minima` é utilizado para os alertas de estoque baixo (`quantidade <= qtd_minima` → status `baixo`, `quantidade = 0` → status `zerado`).
+- Produtos já cadastrados no banco mantêm seus valores de `qtd_minima` sem alterações automáticas destrutivas.
+
 ### Tabela Oficial de SKUs e Regras de Cadastro por Filial
 - O cadastro de produtos exige a escolha obrigatória de uma filial (`filial_id`).
 - O produto criado é associado exclusivamente à filial selecionada (registro único na tabela `estoques`), não sendo propagado automaticamente para as demais filiais.

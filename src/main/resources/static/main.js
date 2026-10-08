@@ -317,7 +317,7 @@ const api = {
         nome: dados.nome,
         codigo: dados.sku,
         descricao: dados.categoria || 'Geral',
-        qtd_minima: dados.qtd_minima || 0,
+        qtd_minima: dados.qtd_minima || 10,
         unidade_medida: 'unidade',
         ativo: true
       };
@@ -326,9 +326,8 @@ const api = {
         if (!pErr && pData) {
           const prodId = pData.id;
           const targetFilialId = parseInt(dados.filialId);
-          const initialQtd = dados.qtd_inicial || 0;
-          const minQtd = dados.qtd_minima || 0;
-          const st = initialQtd === 0 ? 'zerado' : (initialQtd <= minQtd ? 'baixo' : 'suficiente');
+          const initialQtd = 0;
+          const st = 'zerado';
 
           const estoqueRecord = {
             produto_id: prodId,
@@ -345,7 +344,7 @@ const api = {
             sku: dados.sku,
             nome: dados.nome,
             categoria: dados.categoria || 'Geral',
-            qtd_minima: dados.qtd_minima || 0,
+            qtd_minima: dados.qtd_minima || 10,
             filial_id: targetFilialId
           };
         } else if (pErr) {
@@ -1679,14 +1678,13 @@ async function salvarProduto(){
   const sku = $('p-sku') ? $('p-sku').value.trim() : '';
   const categoria = $('p-cat') ? $('p-cat').value.trim() : '';
   const filialId = parseInt($('p-filial') ? $('p-filial').value : 0);
-  const qtd_minima = parseInt($('p-min') ? $('p-min').value : 0) || 0;
-  const qtd_inicial = parseInt($('p-qtd') ? $('p-qtd').value : 0) || 0;
+  const qtd_minima = parseInt($('p-min') ? $('p-min').value : 10) || 10;
 
   if(!nome || !sku){ toast('Preencha Nome e SKU.', true); return; }
   if(!filialId){ toast('Selecione uma filial obrigatória.', true); return; }
 
   try {
-    await api.criarProduto({ nome, sku, categoria, filialId, qtd_minima, qtd_inicial });
+    await api.criarProduto({ nome, sku, categoria, filialId, qtd_minima });
     fecharModal();
     toast('Produto adicionado com sucesso!');
     renderProdutos();

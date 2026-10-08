@@ -42,20 +42,20 @@ O campo Nome do Usuário não é exigido no formulário de login. O nome do perf
 
 Os usuários ativos cadastrados no Supabase (`public.usuarios` e Supabase Auth com senhas em hash BCrypt):
 
-| Nome     | E-mail                        | Cargo       | Permissões / Filial | Status `public.usuarios` | Status `auth.users` |
-| -------- | ----------------------------- | ----------- | ------------------- | ------------------------ | ------------------- |
-| Anderson | `anderson.func@empresa.com`   | Funcionário | Filial Centro (ID 1) | Ativo (ID 4)             | Provisionado Admin  |
-| Robson   | `robson.grt@empresa.com`      | Gerente     | Filial Oeste (ID 5) / Acesso Geral | Ativo (ID 5)      | Provisionado Admin  |
-| Isabella | `isabella.func@empresa.com`   | Funcionária | Filial Norte (ID 2)  | Ativo (ID 6)             | Provisionado Admin  |
-| Manuella | `manuella.grt@empresa.com`    | Gerente     | Filial Leste (ID 4) / Acesso Geral | Ativo (ID 7)      | Provisionado Admin  |
-| Nicoly   | `nicoly.func@empresa.com`     | Funcionária | Filial Sul (ID 3)    | Ativo (ID 2)             | Provisionado Admin  |
-| Nicoly   | `nicoly.grt@empresa.com`      | Gerente     | Filial Sul (ID 3) / Acesso Geral   | Ativo (ID 3)      | Provisionado Admin  |
+| Nome     | E-mail                        | Cargo       | Filial Atribuída | Escopo / Permissões | Pedidos de Compra |
+| -------- | ----------------------------- | ----------- | ---------------- | ------------------- | ----------------- |
+| Anderson | `anderson.func@empresa.com`   | Funcionário | Filial Centro (ID 1) | Restrito à Filial Centro | Bloqueado |
+| Robson   | `robson.grt@empresa.com`      | Gerente     | Filial Oeste (ID 5)  | Acesso Geral (5 Filiais) | Habilitado |
+| Isabella | `isabella.func@empresa.com`   | Funcionária | Filial Norte (ID 2)  | Restrito à Filial Norte  | Bloqueado |
+| Manuella | `manuella.grt@empresa.com`    | Gerente     | Filial Leste (ID 4)  | Acesso Geral (5 Filiais) | Habilitado |
+| Nicoly   | `nicoly.func@empresa.com`     | Funcionária | Filial Sul (ID 3)    | Restrito à Filial Sul    | Bloqueado |
+| Nicoly   | `nicoly.grt@empresa.com`      | Gerente     | Filial Sul (ID 3)    | Acesso Geral (5 Filiais) | Habilitado |
 
-*Notas de Autenticação Definitiva (Supabase Auth):*
-- **Autenticação 100% Supabase Auth:** A autenticação é realizada exclusivamente via `supabase.auth.signInWithPassword({ email, password })`.
-- **Remoção do Fallback BCrypt:** O mecanismo legado de fallback local com `bcrypt.compareSync()` e a biblioteca `bcryptjs` foram completamente removidos do código frontend (`main.js` e `index.html`).
-- **Função da Tabela `public.usuarios`:** A tabela `public.usuarios` armazena exclusivamente os metadados do perfil do funcionário (`nome`, `cargo`, `filial_id`, `ativo`). O campo `senha` não participa mais de qualquer etapa do login.
-- **Mapeamento Unívoco:** O vínculo entre a sessão autenticada (`auth.users`) e o perfil em `public.usuarios` é realizado via e-mail (`auth.jwt() ->> 'email' = public.usuarios.email`), garantindo o isolamento das contas da Nicoly (`nicoly.func@empresa.com` e `nicoly.grt@empresa.com`).
+*Notas de Autenticação Definitiva e RLS:*
+- **Autenticação 100% Supabase Auth:** Login exclusivo via `supabase.auth.signInWithPassword({ email, password })`.
+- **Validação de Permissões e RLS:** Permissões de cargo (`gerente` / `funcionario`) e filial são consultadas diretamente do banco PostgreSQL (`public.usuarios`) e aplicadas pelo RLS (`supabase_rls_policies.sql`).
+- **Segurança:** O frontend não permite alteração manual de perfil ou escopo, e o RLS impede que requisições bypassem o isolamento por filial ou criem pedidos sem permissão.
+- **Isolamento de Contas:** `nicoly.func@empresa.com` (Funcionária / Filial Sul) e `nicoly.grt@empresa.com` (Gerente / Filial Sul) operam como contas totalmente independentes.
 
 ---
 

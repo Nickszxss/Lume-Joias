@@ -404,6 +404,38 @@
 <!-- MODAIS -->
 <div class="modal-overlay" id="modal-overlay" onclick="if(event.target===this)fecharModal()">
 
+  <!-- EDITAR PRODUTO -->
+  <div class="modal" id="modal-editar-produto" style="display:none;">
+    <h3>Editar Produto</h3>
+
+    <input type="hidden" id="ep-id">
+
+    <div class="field">
+      <label>Nome do produto *</label>
+      <input id="ep-nome" placeholder="Nome do produto">
+    </div>
+
+    <div class="field">
+      <label>Categoria</label>
+      <input id="ep-cat" placeholder="Ex: Anéis">
+    </div>
+
+    <div class="field">
+      <label>SKU *</label>
+      <input id="ep-sku" placeholder="001">
+    </div>
+
+    <div class="field">
+      <label>Quantidade mínima</label>
+      <input id="ep-min" type="number" min="0" value="10">
+    </div>
+
+    <div class="actions">
+      <button class="btn btn-secondary" onclick="fecharModal()">Cancelar</button>
+      <button class="btn btn-primary" onclick="salvarEdicaoProduto()">Salvar Alterações</button>
+    </div>
+  </div>
+
   <!-- PRODUTO -->
   <div class="modal" id="modal-produto" style="display:none;">
     <h3>Novo Produto</h3>

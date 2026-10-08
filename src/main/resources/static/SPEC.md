@@ -45,9 +45,16 @@ Sessão Autenticada
 
 ### Gerente
 - Visão consolidada do estoque das 5 filiais no Dashboard.
+- Permissão para editar dados de produtos (nome, SKU, categoria, qtd mínima).
+- Permissão para inativar produtos (`ativo = false`) sem exclusão física de registros históricos.
 - Permissão para criar novos Pedidos de Compra (`#btn-novo-pedido`).
 - Permissão para marcar qualquer Pedido de Compra como recebido.
 - Solicitação e conclusão de transferências entre quaisquer filiais.
+
+### Edição e Inativação de Produtos
+- **Editar:** O gerente pode alterar nome, SKU, categoria e quantidade mínima do produto. Validação impede SKUs duplicados.
+- **Inativar:** Altera o atributo `ativo` para `false`. Registros históricos em estoques, movimentações, transferências e pedidos são preservados integralmente.
+- **Omissão em novas operações:** Produtos inativos são excluídos das opções de seleção para novas transferências e novos pedidos de compra.
 
 ### Restrição de Conclusão de Transferências
 - **Filial de origem:** Não pode concluir a transferência (botão desabilitado no frontend e bloqueado no backend/RLS).

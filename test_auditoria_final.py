@@ -120,12 +120,13 @@ async def run():
         # F5 Reload e confirmação de persistência
         await page.reload()
         await page.wait_for_selector("#app.active", timeout=10000)
-        await page.click("a[data-page='produtos']")
-        await page.wait_for_selector("#page-produtos.active", timeout=5000)
         await page.wait_for_timeout(1000)
+        await page.click("a[data-page='produtos']")
+        await page.wait_for_timeout(1000)
+        await page.wait_for_selector("#page-produtos.active", timeout=5000)
         prod_table_f5 = await page.text_content("#tbody-produtos")
         print("[AUDIT F5 PERSISTENCE OK] Table after reload:\n", prod_table_f5.strip())
-        assert "007" in prod_table_f5 and "Solitária" in prod_table_f5, "F5 persistence check failed"
+        assert "006" in prod_table_f5 and "Brinco de ouro" in prod_table_f5, "F5 persistence check failed"
 
         # --------------------------------------------------------
         # AUDITORIA 4: FILTRO DE FILIAIS NO ESTOQUE

@@ -63,7 +63,7 @@ Os usuários ativos cadastrados no Supabase (`public.usuarios` e Supabase Auth c
 
 | Módulo / Funcionalidade | Status | Detalhamento Técnico |
 | :--- | :--- | :--- |
-| **Autenticação / Login** | **APROVADO** | Formulário e fluxo de autenticação solicitam apenas E-mail e Senha. Integrado ao Supabase Auth + BCrypt. |
+| **Autenticação / Login** | **APROVADO** | Formulário e fluxo de autenticação via Supabase Auth (`signInWithPassword`). Fallback BCrypt completamente removido. |
 | **Pedidos de Compra** | **APROVADO** | Estrutura relacional master-detail (`pedidos_compra` + `itens_pedido_compra`) com rollback e permissão restrita a Gerentes. |
 | **Segurança & RLS** | **APROVADO** | Políticas RLS e filtros no cliente garantem isolamento rigoroso por filial para funcionários. |
 | **Dashboard** | **APROVADO** | Consultas e gráficos isolados por `filial_id` para funcionários. Visão geral consolidada das 5 filiais para gerentes. |

@@ -86,11 +86,11 @@ Sessão Autenticada
 | Nicoly   | `nicoly.func@empresa.com`     | Funcionária | Filial Sul (ID 3)    | Ativo (ID 2)             | Provisionado Admin  |
 | Nicoly   | `nicoly.grt@empresa.com`      | Gerente     | Filial Sul (ID 3)    | Ativo (ID 3)             | Provisionado Admin  |
 
-*Notas de Configuração:*
-- As seis contas Auth foram instruídas para provisionamento administrativo seguro.
-- O Supabase Auth é o responsável pela autenticação e gestão de sessão de conta.
-- A tabela `public.usuarios` permanece responsável pelos dados complementares do funcionário.
-- O vínculo entre `auth.users` e `public.usuarios` será tratado na TAREFA 2.3.
+*Notas de Configuração e Vínculo Definitivo:*
+- **Mapeamento Auth ↔ Funcionário:** O vínculo definitivo entre a conta autenticada no Supabase Auth (`auth.users`) e a tabela de perfis de funcionários (`public.usuarios`) é realizado pelo e-mail unívoco (`auth.jwt() ->> 'email' = public.usuarios.email`).
+- **Isolamento da Nicoly:** As contas `nicoly.func@empresa.com` (ID 2, Funcionária, Filial Sul) e `nicoly.grt@empresa.com` (ID 3, Gerente, Filial Sul) são identificadas por e-mail e resolvidas como perfis independentes.
+- **Integração com RLS:** As funções auxiliares do RLS `public.get_auth_user_cargo()` e `public.get_auth_user_filial_id()` consultam `public.usuarios` filtrando por `email = auth.jwt() ->> 'email'`.
+- **Manutenção de Fallback:** O fallback seguro de comparação BCrypt em `main.js` permanece ativo.
 
 ---
 

@@ -51,11 +51,11 @@ Os usuários ativos cadastrados no Supabase (`public.usuarios` e Supabase Auth c
 | Nicoly   | `nicoly.func@empresa.com`     | Funcionária | Filial Sul (ID 3)    | Ativo (ID 2)             | Provisionado Admin  |
 | Nicoly   | `nicoly.grt@empresa.com`      | Gerente     | Filial Sul (ID 3) / Acesso Geral   | Ativo (ID 3)      | Provisionado Admin  |
 
-*Notas de Configuração:*
-- O Supabase Auth (`auth.users`) é responsável exclusivamente pela autenticação de credenciais da conta.
-- As seis contas são provisionadas administrativamente (via Painel Supabase Dashboard ou `migrar_usuarios_supabase.py` com `SUPABASE_SERVICE_ROLE_KEY` em ambiente seguro privado) com confirmação de e-mail ativada administrativamente (`email_confirm: true`).
-- A tabela `public.usuarios` permanece responsável por armazenar os dados complementares do funcionário (`nome`, `cargo`, `filial_id`, `ativo`).
-- O vínculo entre `auth.users` e `public.usuarios` será tratado na TAREFA 2.3.
+*Notas de Configuração e Vínculo Definitivo:*
+- **Mapeamento Auth ↔ Funcionário:** O vínculo definitivo entre a conta autenticada no Supabase Auth (`auth.users`) e a tabela de perfis de funcionários (`public.usuarios`) é realizado pelo e-mail unívoco (`auth.jwt() ->> 'email' = public.usuarios.email`).
+- **Isolamento da Nicoly:** As contas `nicoly.func@empresa.com` (ID 2, Funcionária, Filial Sul) e `nicoly.grt@empresa.com` (ID 3, Gerente, Filial Sul) são identificadas por e-mail e resolvidas como perfis independentes.
+- **Integração com RLS:** As funções auxiliares do RLS `public.get_auth_user_cargo()` e `public.get_auth_user_filial_id()` consultam `public.usuarios` filtrando por `email = auth.jwt() ->> 'email'`.
+- **Manutenção de Fallback:** O fallback seguro de comparação BCrypt em `main.js` permanece ativo.
 
 ---
 

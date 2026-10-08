@@ -42,14 +42,16 @@ O campo Nome do Usuário não é exigido no formulário de login. O nome do perf
 
 Os usuários ativos cadastrados no Supabase (`public.usuarios` e Supabase Auth com senhas em hash BCrypt):
 
-| Nome     | E-mail                        | Senha       | Cargo       | Permissões / Filial | Status Autenticação |
-| -------- | ----------------------------- | ----------- | ----------- | ------------------- | ------------------- |
-| Anderson | `anderson.func@empresa.com`   | etec2026@DS | Funcionário | Filial Centro (ID 1) | Homologado |
-| Robson   | `robson.grt@empresa.com`      | etec2026@DS | Gerente     | Acesso Geral (5 Filiais) | Homologado |
-| Isabella | `isabella.func@empresa.com`   | etec2026@DS | Funcionário | Filial Norte (ID 2) | Homologado |
-| Manuella | `manuella.grt@empresa.com`    | etec2026@DS | Gerente     | Acesso Geral (5 Filiais) | Homologado |
-| Nicoly   | `nicoly.func@empresa.com`     | 160611      | Funcionária | Filial Norte (ID 2) | Homologado |
-| Nicoly   | `nicoly.grt@empresa.com`      | 160611      | Gerente     | Filial Leste (ID 4 / 5 Filiais) | Homologado |
+| Nome     | E-mail                        | Cargo       | Permissões / Filial | Status `public.usuarios` | Status `auth.users` |
+| -------- | ----------------------------- | ----------- | ------------------- | ------------------------ | ------------------- |
+| Anderson | `anderson.func@empresa.com`   | Funcionário | Filial Centro (ID 1) | Ativo (ID 4)             | Pendente            |
+| Robson   | `robson.grt@empresa.com`      | Gerente     | Filial Oeste (ID 5) / Acesso Geral | Ativo (ID 5)      | Pendente            |
+| Isabella | `isabella.func@empresa.com`   | Funcionária | Filial Norte (ID 2)  | Ativo (ID 6)             | Pendente            |
+| Manuella | `manuella.grt@empresa.com`    | Gerente     | Filial Leste (ID 4) / Acesso Geral | Ativo (ID 7)      | Pendente            |
+| Nicoly   | `nicoly.func@empresa.com`     | Funcionária | Filial Sul (ID 3)    | Ativo (ID 2)             | Pendente            |
+| Nicoly   | `nicoly.grt@empresa.com`      | Gerente     | Filial Sul (ID 3) / Acesso Geral   | Ativo (ID 3)      | Pendente            |
+
+*Nota: A criação dos usuários no Supabase Auth (`auth.users`) permanece pendente para execução em etapa posterior.*
 
 ---
 

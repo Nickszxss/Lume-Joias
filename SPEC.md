@@ -77,14 +77,16 @@ Sessão Autenticada
 
 ### Usuários de Teste
 
-| Nome     | E-mail                        | Senha       | Cargo       | Filial Atribuída |
-| -------- | ----------------------------- | ----------- | ----------- | ---------------- |
-| Anderson | `anderson.func@empresa.com`   | etec2026@DS | Funcionário | Filial Centro (ID 1) |
-| Robson   | `robson.grt@empresa.com`      | etec2026@DS | Gerente     | Geral (5 Filiais) |
-| Isabella | `isabella.func@empresa.com`   | etec2026@DS | Funcionário | Filial Norte (ID 2) |
-| Manuella | `manuella.grt@empresa.com`    | etec2026@DS | Gerente     | Geral (5 Filiais) |
-| Nicoly   | `nicoly.func@empresa.com`     | 160611      | Funcionária | Filial Norte (ID 2) |
-| Nicoly   | `nicoly.grt@empresa.com`      | 160611      | Gerente     | Filial Leste (ID 4) / Geral |
+| Nome     | E-mail                        | Cargo       | Filial Atribuída | Status `public.usuarios` | Status `auth.users` |
+| -------- | ----------------------------- | ----------- | ---------------- | ------------------------ | ------------------- |
+| Anderson | `anderson.func@empresa.com`   | Funcionário | Filial Centro (ID 1) | Ativo (ID 4)             | Pendente            |
+| Robson   | `robson.grt@empresa.com`      | Gerente     | Filial Oeste (ID 5)  | Ativo (ID 5)             | Pendente            |
+| Isabella | `isabella.func@empresa.com`   | Funcionária | Filial Norte (ID 2)  | Ativo (ID 6)             | Pendente            |
+| Manuella | `manuella.grt@empresa.com`    | Gerente     | Filial Leste (ID 4)  | Ativo (ID 7)             | Pendente            |
+| Nicoly   | `nicoly.func@empresa.com`     | Funcionária | Filial Sul (ID 3)    | Ativo (ID 2)             | Pendente            |
+| Nicoly   | `nicoly.grt@empresa.com`      | Gerente     | Filial Sul (ID 3)    | Ativo (ID 3)             | Pendente            |
+
+*Nota: A criação das contas no Supabase Auth (`auth.users`) permanece pendente para execução em etapa posterior.*
 
 ---
 

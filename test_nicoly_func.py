@@ -25,14 +25,14 @@ async def run():
         assert user_name == "Nicoly", "User name mismatch for Nicoly Funcionária"
         assert user_tipo == "Funcionário" or user_tipo == "Funcionária", "Role mismatch for Nicoly Funcionária"
 
-        # Verify Dashboard Scope for Filial Norte (ID 2)
+        # Verify Dashboard Scope for Filial Sul (ID 3)
         dash_desc = await page.text_content("#dash-desc")
         print("[TEST 2 - Dashboard Scope] Desc:", dash_desc)
-        assert "Filial Norte" in dash_desc, "Dashboard description did not reference Filial Norte"
+        assert "Filial Sul" in dash_desc, "Dashboard description did not reference Filial Sul"
 
         kpi_badge = await page.text_content("#dash-kpis .kpi .badge.info")
         print("[TEST 2 - KPI Badge]:", kpi_badge)
-        assert "Norte" in kpi_badge or "2" in kpi_badge, "KPI badge did not reference Filial Norte"
+        assert "Sul" in kpi_badge or "3" in kpi_badge, "KPI badge did not reference Filial Sul"
 
         # Verify Employee Restrictions (Purchase Order button disabled)
         await page.click("a[data-page='pedidos']")

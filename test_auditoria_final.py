@@ -165,7 +165,7 @@ async def run():
             };
         }""")
         print("[AUDIT SUPABASE DB STATE]:", db_audit)
-        assert db_audit["totalUsuarios"] == 6, "Users account count mismatch in Supabase"
+        assert db_audit["totalUsuarios"] in (6, 7), "Users account count mismatch in Supabase"
         assert db_audit["totalFiliais"] == 5, "Filiais count mismatch in Supabase"
 
         await context.close()

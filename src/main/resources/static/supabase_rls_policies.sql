@@ -33,6 +33,7 @@ DROP POLICY IF EXISTS "Bloqueio Alteracao Cargo Filial Usuarios" ON public.usuar
 
 DROP POLICY IF EXISTS "Leitura Publica Filiais" ON public.filiais;
 DROP POLICY IF EXISTS "Leitura Publica Produtos" ON public.produtos;
+DROP POLICY IF EXISTS "Atualizacao Produtos Apenas Gerente" ON public.produtos;
 
 DROP POLICY IF EXISTS "Leitura Estoques por Perfil" ON public.estoques;
 DROP POLICY IF EXISTS "Escrita Estoques por Perfil" ON public.estoques;
@@ -70,6 +71,11 @@ FOR UPDATE USING (
 -- 5. POLÍTICAS DAS TABELAS 'filiais' E 'produtos'
 CREATE POLICY "Leitura Publica Filiais" ON public.filiais FOR SELECT USING (true);
 CREATE POLICY "Leitura Publica Produtos" ON public.produtos FOR SELECT USING (true);
+
+CREATE POLICY "Atualizacao Produtos Apenas Gerente" ON public.produtos
+FOR UPDATE USING (
+  public.get_auth_user_cargo() = 'gerente'
+);
 
 -- 6. POLÍTICAS DA TABELA 'estoques'
 CREATE POLICY "Leitura Estoques por Perfil" ON public.estoques

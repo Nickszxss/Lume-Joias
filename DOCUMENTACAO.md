@@ -71,6 +71,7 @@ Os usuários ativos cadastrados no Supabase (`public.usuarios` e Supabase Auth c
 | **Transferências** | **APROVADO** | Validação de saldo de origem, conclusão restrita à filial de destino ou gerente, atualização atômica para 'concluida' e registro duplo no histórico. |
 | **Histórico / Audit** | **APROVADO** | Exibição em tempo real de movimentações com identificação de usuário e filial. |
 | **Design / Tema** | **APROVADO** | Alternância dinâmica entre Modo Claro (rose `#9d3b5c`) e Modo Escuro (`#c65b7e`). |
+| **Edição e Inativação de Produtos** | **APROVADO** | Permissão exclusiva para Gerentes editarem dados cadastrais (nome, SKU, categoria) e inativarem produtos (`ativo = false`) sem exclusão física do histórico/estoque. |
 | **Cadastro de Produtos por Filial** | **APROVADO** | Seleção obrigatória de Filial (`#p-filial`) associando o produto/estoque estritamente à filial escolhida. |
 | **Preenchimento Automático do SKU** | **APROVADO** | Tabela oficial de SKUs (001 a 009 com zeros à esquerda) preenchida e atualizada automaticamente conforme o tipo de produto selecionado. |
 | **Filtro de Filiais no Estoque** | **APROVADO** | Filtro funcional por botões ("Todas" e Filiais 1 a 5) na tela de estoque com coluna de Filial dedicada e filtragem reativa. |
@@ -101,6 +102,12 @@ Os usuários ativos cadastrados no Supabase (`public.usuarios` e Supabase Auth c
 ---
 
 ## 6. Fluxo de Recebimento de Pedidos de Compra
+
+- **Edição e Inativação Lógica de Produtos:**
+  - **Edição:** Permite ao Gerente alterar nome, SKU, categoria e quantidade mínima. O sistema valida se o novo SKU já está em uso por outro produto.
+  - **Inativação Lógica:** Permite ao Gerente inativar um produto (`ativo = false`). Nenhum registro é excluído fisicamente do banco de dados, preservando todo o histórico de movimentações, estoques, transferências e pedidos.
+  - **Filtro de Operações:** Produtos inativos são automaticamente omitidos da listagem de opções para novas solicitações de transferências e novos pedidos de compra.
+  - **Permissões:** Ações de edição e inativação são restritas a Gerentes no frontend e protegidas via política RLS no Supabase PostgreSQL.
 
 - **Ação "Marcar como Recebido":** Disponível na tabela de Pedidos de Compra para pedidos com status `aberto`.
 - **Validação de Permissão:** Permitido para gerentes ou funcionários vinculados à filial solicitante do pedido.

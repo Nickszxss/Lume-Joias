@@ -234,12 +234,78 @@ const api = {
           id: p.id,
           sku: p.sku || p.codigo || obterSkuPorNome(p.nome),
           nome: p.nome,
-          categoria: p.categoria || 'Geral',
-          qtd_minima: p.qtd_minima ?? 0
+          categoria: p.categoria || p.descricao || 'Geral',
+          qtd_minima: p.qtd_minima ?? 0,
+          ativo: p.ativo !== false
         }));
       }
     }
     return apiRequest('/produtos');
+  },
+
+  editarProduto: async (id, dados) => {
+    if (usuario && usuario.tipo !== 'gerente') {
+      throw new Error('Apenas gerentes possuem permissão para editar produtos.');
+    }
+    if (!dados.nome || !dados.sku) {
+      throw new Error('Nome e SKU do produto são obrigatórios.');
+    }
+
+    const client = getSupabaseClient();
+    if (client) {
+      // Verificar se o novo SKU já é utilizado por outro produto
+      const { data: existingSkus } = await client
+        .from('produtos')
+        .select('id, codigo')
+        .eq('codigo', dados.sku)
+        .neq('id', id);
+
+      if (existingSkus && existingSkus.length > 0) {
+        throw new Error(`O SKU '${dados.sku}' já está em uso por outro produto.`);
+      }
+
+      const payload = {
+        nome: dados.nome,
+        codigo: dados.sku,
+        descricao: dados.categoria || 'Geral',
+        qtd_minima: dados.qtd_minima || 0
+      };
+
+      const { data, error } = await client
+        .from('produtos')
+        .update(payload)
+        .eq('id', id)
+        .select()
+        .single();
+
+      if (error) {
+        throw new Error(error.message || 'Erro ao atualizar dados do produto no Supabase.');
+      }
+      return data;
+    }
+    return apiRequest(`/produtos/${id}`, { method: 'PUT', body: JSON.stringify(dados) });
+  },
+
+  inativarProduto: async (id) => {
+    if (usuario && usuario.tipo !== 'gerente') {
+      throw new Error('Apenas gerentes possuem permissão para inativar produtos.');
+    }
+
+    const client = getSupabaseClient();
+    if (client) {
+      const { data, error } = await client
+        .from('produtos')
+        .update({ ativo: false })
+        .eq('id', id)
+        .select()
+        .single();
+
+      if (error) {
+        throw new Error(error.message || 'Erro ao inativar produto no Supabase.');
+      }
+      return data;
+    }
+    return apiRequest(`/produtos/${id}/inativar`, { method: 'PATCH' });
   },
 
   criarProduto: async (dados) => {
@@ -1361,6 +1427,8 @@ function pintarProdutos(){
   const busca = $('busca-produto') ? $('busca-produto').value.toLowerCase() : '';
   const st = $('filtro-status') ? $('filtro-status').value : '';
 
+  const isGerente = usuario && usuario.tipo === 'gerente';
+
   let html = '';
   produtos
     .filter(p => p.nome.toLowerCase().includes(busca) || p.sku.toLowerCase().includes(busca))
@@ -1372,20 +1440,103 @@ function pintarProdutos(){
       filteredEstoques.forEach(e => {
         const status = e.status ?? statusEstoque(e.quantidade, p.qtd_minima);
         if(st && status !== st) return;
+
+        let statusBadge = `<span class="badge ${status==='zerado'?'danger':status==='baixo'?'warn':'ok'}">${STATUS_LABEL[status]}</span>`;
+        if (p.ativo === false) {
+          statusBadge += ` <span class="badge danger" style="background:#ef444422; color:#ef4444; margin-left:4px;">Inativo</span>`;
+        }
+
+        let acoesHtml = `<button class="btn-sm btn-secondary" onclick="abrirModalAjuste(${p.id}, ${e.filial_id})">Ajustar</button>`;
+        if (isGerente) {
+          acoesHtml += `
+            <button class="btn-sm btn-secondary" style="margin-left:4px;" onclick="abrirModalEditarProduto(${p.id})">Editar</button>
+            ${p.ativo !== false ? `<button class="btn-sm btn-secondary" style="margin-left:4px; color:var(--danger-color, #ef4444);" onclick="inativarPrd(${p.id}, this)">Inativar</button>` : ''}
+          `;
+        }
+
         html += `
-          <tr>
+          <tr class="${p.ativo === false ? 'row-inativo' : ''}">
             <td><code>${p.sku}</code></td>
             <td><b>${p.nome}</b></td>
             <td>${p.categoria}</td>
             <td>${p.qtd_minima}</td>
             <td>${nomeFilial(e.filial_id)}</td>
             <td>${e.quantidade}</td>
-            <td><span class="badge ${status==='zerado'?'danger':status==='baixo'?'warn':'ok'}">${STATUS_LABEL[status]}</span></td>
-            <td><button class="btn-sm btn-secondary" onclick="abrirModalAjuste(${p.id}, ${e.filial_id})">Ajustar</button></td>
+            <td>${statusBadge}</td>
+            <td>${acoesHtml}</td>
           </tr>`;
       });
     });
   tb.innerHTML = html || '<tr><td colspan="8" class="empty-state">Nenhum produto encontrado.</td></tr>';
+}
+
+function abrirModalEditarProduto(id) {
+  if (usuario && usuario.tipo !== 'gerente') {
+    toast('Apenas gerentes podem editar produtos.', true);
+    return;
+  }
+  const prd = produtos.find(p => p.id === id);
+  if (!prd) {
+    toast('Produto não localizado.', true);
+    return;
+  }
+
+  $('ep-id').value = prd.id;
+  $('ep-nome').value = prd.nome;
+  $('ep-sku').value = prd.sku;
+  $('ep-cat').value = prd.categoria || '';
+  $('ep-min').value = prd.qtd_minima ?? 10;
+
+  const overlay = $('modal-overlay');
+  const modalE = $('modal-editar-produto');
+  if (overlay) overlay.classList.add('active');
+  if (modalE) modalE.style.display = 'block';
+}
+
+async function salvarEdicaoProduto() {
+  const id = parseInt($('ep-id').value);
+  const nome = $('ep-nome').value.trim();
+  const sku = $('ep-sku').value.trim();
+  const categoria = $('ep-cat').value.trim();
+  const qtd_minima = parseInt($('ep-min').value) || 0;
+
+  if (!nome || !sku) {
+    toast('Nome e SKU são obrigatórios.', true);
+    return;
+  }
+
+  try {
+    await api.editarProduto(id, { nome, sku, categoria, qtd_minima });
+    fecharModal();
+    toast('Produto atualizado com sucesso!');
+    renderProdutos();
+  } catch (err) {
+    toast(err.message || 'Não foi possível atualizar o produto.', true);
+  }
+}
+
+async function inativarPrd(id, btn) {
+  if (usuario && usuario.tipo !== 'gerente') {
+    toast('Apenas gerentes podem inativar produtos.', true);
+    return;
+  }
+  const prd = produtos.find(p => p.id === id);
+  if (!prd) return;
+
+  if (!confirm(`Deseja realmente inativar o produto "${prd.nome}"?`)) {
+    return;
+  }
+
+  if (btn) btn.disabled = true;
+
+  try {
+    await api.inativarProduto(id);
+    toast(`Produto "${prd.nome}" inativado com sucesso!`);
+    renderProdutos();
+  } catch (err) {
+    toast(err.message || 'Não foi possível inativar o produto.', true);
+    if (btn) btn.disabled = false;
+  }
 }
 const MAPA_SKU = {
   'Colar de prata': '001',
@@ -1596,10 +1747,11 @@ async function abrirModalTransferencia(){
     toast('Não foi possível carregar os produtos.', true);
     return;
   }
-  if(produtos.length === 0){ toast('Cadastre ao menos um produto antes de transferir.', true); return; }
+  const produtosAtivos = produtos.filter(p => p.ativo !== false);
+  if(produtosAtivos.length === 0){ toast('Nenhum produto ativo disponível para transferência.', true); return; }
 
   const tp = $('t-produto');
-  if (tp) tp.innerHTML = produtos.map(p=>`<option value="${p.id}">${p.nome}</option>`).join('');
+  if (tp) tp.innerHTML = produtosAtivos.map(p=>`<option value="${p.id}">${p.nome}</option>`).join('');
 
   const to = $('t-origem');
   if (to) {
@@ -1740,10 +1892,11 @@ async function abrirModalPedido(){
     toast('Não foi possível carregar os produtos.', true);
     return;
   }
-  if(produtos.length === 0){ toast('Cadastre ao menos um produto antes de criar um pedido.', true); return; }
+  const produtosAtivos = produtos.filter(p => p.ativo !== false);
+  if(produtosAtivos.length === 0){ toast('Nenhum produto ativo disponível para criação de pedidos.', true); return; }
 
   const pcp = $('pc-produto');
-  if (pcp) pcp.innerHTML = produtos.map(p=>`<option value="${p.id}">${p.nome}</option>`).join('');
+  if (pcp) pcp.innerHTML = produtosAtivos.map(p=>`<option value="${p.id}">${p.nome}</option>`).join('');
 
   const pcf = $('pc-filial');
   if (pcf) pcf.innerHTML = FILIAIS.map(f=>`<option value="${f.id}">${f.nome}</option>`).join('');

@@ -22,8 +22,8 @@ async def run():
         await page.wait_for_selector("#app.active", timeout=10000)
 
         # Garantir produto com estoque na Filial Norte (ID 2)
-        await page.click("a[data-page='produtos']")
-        await page.wait_for_timeout(1000)
+        await page.wait_for_timeout(500)
+        await page.click("#menu a[data-page='produtos']")
         await page.wait_for_selector("#page-produtos.active", timeout=5000)
         await page.click("button:has-text('+ Novo Produto')")
         await page.wait_for_selector("#modal-produto", timeout=5000)
@@ -35,8 +35,7 @@ async def run():
         await page.wait_for_timeout(1000)
 
         # Solicitar transferência de 10 unidades de Filial Norte (2) -> Filial Sul (3)
-        await page.click("a[data-page='transferencias']")
-        await page.wait_for_timeout(1000)
+        await page.click("#menu a[data-page='transferencias']")
         await page.wait_for_selector("#page-transferencias.active", timeout=5000)
 
         await page.click("button:has-text('+ Nova Transferência')")
@@ -77,8 +76,7 @@ async def run():
         await page.click("button:has-text('Entrar')")
         await page.wait_for_selector("#app.active", timeout=10000)
 
-        await page.click("a[data-page='transferencias']")
-        await page.wait_for_timeout(1000)
+        await page.click("#menu a[data-page='transferencias']")
         await page.wait_for_selector("#page-transferencias.active", timeout=5000)
 
         # Verificar se o botão Concluir para a transferência está desabilitado na UI

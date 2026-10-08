@@ -281,6 +281,7 @@ const api = {
       if (error) {
         throw new Error(error.message || 'Erro ao atualizar dados do produto no Supabase.');
       }
+      notificarRealtime('produtos', { id });
       return data;
     }
     return apiRequest(`/produtos/${id}`, { method: 'PUT', body: JSON.stringify(dados) });
@@ -303,6 +304,7 @@ const api = {
       if (error) {
         throw new Error(error.message || 'Erro ao inativar produto no Supabase.');
       }
+      notificarRealtime('produtos', { id });
       return data;
     }
     return apiRequest(`/produtos/${id}/inativar`, { method: 'PATCH' });
@@ -336,6 +338,8 @@ const api = {
           };
           await client.from('estoques').insert([estoqueRecord]);
 
+          notificarRealtime('produtos', { id: prodId });
+          notificarRealtime('estoques', { produto_id: prodId, filial_id: targetFilialId });
           return {
             id: prodId,
             sku: dados.sku,
@@ -418,6 +422,8 @@ const api = {
         created_at: new Date().toISOString()
       }]);
 
+      notificarRealtime('estoques', { produto_id: dados.produtoId, filial_id: dados.filialId });
+      notificarRealtime('movimentacoes', { produto_id: dados.produtoId, filial_id: dados.filialId });
       return { produto_id: dados.produtoId, filial_id: dados.filialId, quantidade: novaQtd, status: st };
     }
     return apiRequest('/estoque/ajustar', { method: 'POST', body: JSON.stringify(dados) });
@@ -491,6 +497,7 @@ const api = {
       };
       const { data, error } = await client.from('transferencias').insert([payload]).select().single();
       if (!error && data) {
+        notificarRealtime('transferencias', { id: data.id });
         return {
           id: data.id,
           produto_id: data.produto_id,
@@ -608,6 +615,9 @@ const api = {
         }
       ]);
 
+      notificarRealtime('transferencias', { id });
+      notificarRealtime('estoques', { produto_id: transf.produto_id });
+      notificarRealtime('movimentacoes', { produto_id: transf.produto_id });
       return { ...transf, status: 'concluida' };
     }
     return apiRequest(`/transferencias/${id}/concluir`, { method: 'PATCH' });
@@ -700,6 +710,7 @@ const api = {
         throw new Error(iErr.message || 'Erro ao gravar os itens do pedido de compra.');
       }
 
+      notificarRealtime('pedidos_compra', { id: pedido.id });
       return {
         id: pedido.id,
         produto_id: dados.produtoId,
@@ -803,6 +814,9 @@ const api = {
         }]);
       }
 
+      notificarRealtime('pedidos_compra', { id });
+      notificarRealtime('estoques', { filial_id: pedido.filial_id });
+      notificarRealtime('movimentacoes', { filial_id: pedido.filial_id });
       return { ...pedido, status: 'recebido', recebido_at: dataHora };
     }
     return apiRequest(`/pedidos/${id}/receber`, { method: 'POST' });
@@ -1003,6 +1017,74 @@ let pedidos = [];
 let chartFilial = null, chartMov = null;
 let filialDashSel = null, filialEstoqueSel = null;
 let ajusteTarget = null;
+let realtimeChannel = null;
+
+// ---------- REALTIME SUBSCRIPTIONS (SUPABASE REALTIME) ----------
+function notificarRealtime(tabela, dados = {}) {
+  if (realtimeChannel) {
+    try {
+      realtimeChannel.send({
+        type: 'broadcast',
+        event: 'sge_data_change',
+        payload: { tabela, ...dados }
+      });
+    } catch (_) {}
+  }
+}
+
+function iniciarRealtimeSubscriptions() {
+  const client = getSupabaseClient();
+  if (!client || typeof client.channel !== 'function') return;
+
+  if (realtimeChannel) {
+    try { client.removeChannel(realtimeChannel); } catch (_) {}
+    realtimeChannel = null;
+  }
+
+  try {
+    realtimeChannel = client.channel('sge_realtime_channel')
+      .on('broadcast', { event: 'sge_data_change' }, (p) => {
+        if (p && p.payload && p.payload.tabela) {
+          atualizarTelasRealtime(p.payload.tabela, p.payload);
+        }
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'estoques' }, (p) => atualizarTelasRealtime('estoques', p))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'movimentacoes' }, (p) => atualizarTelasRealtime('movimentacoes', p))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'transferencias' }, (p) => atualizarTelasRealtime('transferencias', p))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'pedidos_compra' }, (p) => atualizarTelasRealtime('pedidos_compra', p))
+      .subscribe();
+  } catch (err) {
+    console.warn('Supabase Realtime indisponível temporariamente:', err);
+  }
+}
+
+function encerrarRealtimeSubscriptions() {
+  const client = getSupabaseClient();
+  if (client && realtimeChannel) {
+    try { client.removeChannel(realtimeChannel); } catch (_) {}
+    realtimeChannel = null;
+  }
+}
+
+function atualizarTelasRealtime(tabela, payload) {
+  const activePage = document.querySelector('.page.active')?.id;
+
+  if (activePage === 'page-dashboard') {
+    renderDashboard();
+  } else if (activePage === 'page-estoque' && tabela === 'estoques') {
+    renderEstoque();
+  } else if (activePage === 'page-produtos' && tabela === 'estoques') {
+    renderProdutos();
+  } else if (activePage === 'page-transferencias' && tabela === 'transferencias') {
+    renderTransferencias();
+  } else if (activePage === 'page-pedidos' && tabela === 'pedidos_compra') {
+    renderPedidos();
+  } else if (activePage === 'page-alertas' && (tabela === 'estoques' || tabela === 'produtos')) {
+    renderAlertas();
+  } else if (activePage === 'page-historico' && tabela === 'movimentacoes') {
+    renderHistorico();
+  }
+}
 
 const ICON_SUN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>';
 const ICON_MOON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M20 14.5A8.5 8.5 0 1 1 9.5 4a7 7 0 0 0 10.5 10.5Z"/></svg>';
@@ -1187,10 +1269,12 @@ async function aplicarLogin(dadosUsuario){
   }
 
   montarFiltros();
+  iniciarRealtimeSubscriptions();
   irPara('dashboard');
 }
 
 async function sair(){
+  encerrarRealtimeSubscriptions();
   const client = getSupabaseClient();
   if (client && client.auth) {
     try { await client.auth.signOut(); } catch (_) {}

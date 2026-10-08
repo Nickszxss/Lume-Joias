@@ -21,13 +21,20 @@ https://nickszxss.github.io/Lume-Joias/
   Banco de dados:
   PostgreSQL / Supabase
   ```
-- **Execução Serverless:** A aplicação é 100% estática client-side (HTML5, CSS3, JavaScript Vanilla ES6+) hospedada no GitHub Pages comunicando-se diretamente com o Supabase PostgreSQL via SDK / REST API pública.
+- **Execução Serverless:** A aplicação é 100% estática client-side (HTML5, CSS3, JavaScript Vanilla ES6+) hospedada no GitHub Pages comunicando-se diretamente com o Supabase PostgreSQL via SDK / REST API pública. O GitHub Pages não executa nenhum backend Java/Spring Boot.
 
 ---
 
 ## 2. Autenticação e Usuários de Teste
 
-A autenticação é realizada solicitando exclusivamente:
+- **Diretrizes de Autenticação:**
+  - O sistema está migrando para autenticação exclusivamente pelo **Supabase Auth** (`supabase.auth.signInWithPassword`).
+  - O GitHub Pages não executa backend Java/Spring Boot.
+  - A autenticação deve utilizar **e-mail + senha**.
+  - A tabela de funcionários (`public.usuarios`) armazena os dados complementares do usuário (nome, cargo, filial_id, ativo).
+  - O Supabase Auth (`auth.users`) será o único responsável pela autenticação e validação da conta.
+
+A autenticação no frontend é realizada solicitando exclusivamente:
 ```text
 E-mail + Senha
 ```

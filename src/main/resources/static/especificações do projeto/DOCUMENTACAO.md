@@ -27,7 +27,14 @@ https://nickszxss.github.io/Lume-Joias/
 
 ## 2. Autenticação e Usuários de Teste
 
-A autenticação é realizada solicitando exclusivamente:
+- **Diretrizes de Autenticação:**
+  - O sistema está migrando para autenticação exclusivamente pelo **Supabase Auth** (`supabase.auth.signInWithPassword`).
+  - O GitHub Pages não executa backend Java/Spring Boot.
+  - A autenticação deve utilizar **e-mail + senha**.
+  - A tabela de funcionários (`public.usuarios`) armazena os dados complementares do usuário (nome, cargo, filial_id, ativo).
+  - O Supabase Auth (`auth.users`) será o único responsável pela autenticação e validação da conta.
+
+A autenticação no frontend é realizada solicitando exclusivamente:
 ```text
 E-mail + Senha
 ```

@@ -22,18 +22,22 @@ PostgreSQL / Supabase
 
 ## 2. Autenticação
 
-A autenticação é realizada diretamente no Supabase utilizando o fluxo:
+O sistema está migrando para autenticação exclusivamente realizada via **Supabase Auth**:
 
 ```text
 E-mail + Senha
        ↓
-Supabase Auth / public.usuarios
+Supabase Auth (GoTrue auth.users)
+       ↓
+Consulta public.usuarios (Metadados: nome, cargo, filial_id)
        ↓
 Sessão Autenticada
 ```
 
+- **Migração Supabase Auth:** O Supabase Auth (`auth.users`) é o único responsável pela autenticação de credenciais da conta.
+- **Hospedagem Serverless:** O GitHub Pages hospeda o frontend estático e não executa backend Java/Spring Boot.
 - **Sem campo de nome no login:** O formulário exige exclusivamente E-mail e Senha.
-- **Identificação:** O nome do usuário permanece registrado no perfil Supabase e é exibido na interface e relatórios após a autenticação.
+- **Tabela de Funcionários:** A tabela `public.usuarios` armazena os dados complementares do usuário (nome, e-mail, cargo, filial_id, ativo).
 
 ---
 

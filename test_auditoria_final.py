@@ -87,8 +87,8 @@ async def run():
         # AUDITORIA 3: CADASTRO POR FILIAL E PERSISTÊNCIA F5
         # --------------------------------------------------------
         print("\n--- 3. AUDITORIA DE CADASTRO POR FILIAL ÚNICA E PERSISTÊNCIA F5 ---")
-        # Cadastrar 'Solitária' (SKU 007) vinculado EXCLUSIVAMENTE à Filial Leste (ID 4)
-        await page.select_option("#p-nome", value="Solitária")
+        # Cadastrar 'Brinco de ouro' (SKU 006) vinculado EXCLUSIVAMENTE à Filial Leste (ID 4)
+        await page.select_option("#p-nome", value="Brinco de ouro")
         await page.select_option("#p-filial", value="4") # Filial Leste
         await page.fill("#p-min", "2")
         await page.fill("#p-qtd", "8")
@@ -108,14 +108,14 @@ async def run():
         await page.wait_for_timeout(500)
         rows_leste = await page.text_content("#tbody-estoque")
         print("[AUDIT ESTOQUE LESTE]:\n", rows_leste.strip())
-        assert "Solitária" in rows_leste and "Filial Leste" in rows_leste, "Product not in Filial Leste stock"
+        assert "Brinco de ouro" in rows_leste and "Filial Leste" in rows_leste, "Product not in Filial Leste stock"
 
         # Verificar se NÃO VAZOU para Filial Centro (ID 1)
         await page.click("#estoque-filiais button:has-text('Centro')")
         await page.wait_for_timeout(500)
         rows_centro = await page.text_content("#tbody-estoque")
         print("[AUDIT ESTOQUE CENTRO - VAZAMENTO CHECK]:\n", rows_centro.strip())
-        assert "Solitária" not in rows_centro, "Product leaked into Filial Centro!"
+        assert "Brinco de ouro" not in rows_centro, "Product leaked into Filial Centro!"
 
         # F5 Reload e confirmação de persistência
         await page.reload()

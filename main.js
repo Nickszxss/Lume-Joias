@@ -456,6 +456,18 @@ const api = {
       const origId = transf.origem_id || transf.origem_filial_id;
       const destId = transf.destino_id || transf.destino_filial_id;
 
+      // Validação de permissão: Apenas gerente ou funcionário da filial de destino podem concluir
+      const isGerente = usuario && usuario.tipo === 'gerente';
+      const isDestino = usuario && usuario.filial_id && String(usuario.filial_id) === String(destId);
+
+      if (!isGerente && !isDestino) {
+        if (usuario && usuario.filial_id && String(usuario.filial_id) === String(origId)) {
+          throw new Error('Acesso negado: A filial de origem não tem permissão para concluir a transferência.');
+        } else {
+          throw new Error('Acesso negado: Apenas a filial de destino ou um gerente pode concluir esta transferência.');
+        }
+      }
+
       // Buscar estoques de origem e destino
       const { data: origEst } = await client.from('estoques').select('*').eq('produto_id', transf.produto_id).eq('filial_id', origId).single();
       const { data: destEst } = await client.from('estoques').select('*').eq('produto_id', transf.produto_id).eq('filial_id', destId).single();
@@ -1550,6 +1562,18 @@ function pintarTransferencias(){
     ? '<tr><td colspan="9" class="empty-state">Nenhuma transferência registrada.</td></tr>'
     : transferencias.map(t => {
       const pender = t.status === 'solicitada' || t.status === 'pendente';
+      const tDestinoId = t.destino_id || t.destino_filial_id;
+      const podeConcluir = usuario && (usuario.tipo === 'gerente' || String(tDestinoId) === String(usuario.filial_id));
+
+      let acaoHtml = '—';
+      if (pender) {
+        if (podeConcluir) {
+          acaoHtml = `<button class="btn-sm btn-primary" onclick="concluirTransf(${t.id}, this)">Concluir</button>`;
+        } else {
+          acaoHtml = `<button class="btn-sm btn-secondary" disabled title="Apenas a filial de destino ou um gerente pode concluir esta transferência">Concluir</button>`;
+        }
+      }
+
       return `
       <tr>
         <td>#${t.id}</td>
@@ -1560,7 +1584,7 @@ function pintarTransferencias(){
         <td>${t.solicitante}</td>
         <td>${t.data}</td>
         <td><span class="badge ${t.status==='concluida'?'ok':'info'}">${t.status}</span></td>
-        <td>${pender ? `<button class="btn-sm btn-primary" onclick="concluirTransf(${t.id}, this)">Concluir</button>` : '—'}</td>
+        <td>${acaoHtml}</td>
       </tr>
     `}).join('');
 }

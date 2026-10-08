@@ -49,6 +49,12 @@ Sessão Autenticada
 - Permissão para marcar qualquer Pedido de Compra como recebido.
 - Solicitação e conclusão de transferências entre quaisquer filiais.
 
+### Restrição de Conclusão de Transferências
+- **Filial de origem:** Não pode concluir a transferência (botão desabilitado no frontend e bloqueado no backend/RLS).
+- **Filial de destino:** Pode concluir a transferência.
+- **Gerente:** Pode concluir qualquer transferência.
+- **Outras filiais:** Não podem concluir a transferência.
+
 ### Recebimento de Pedidos de Compra
 - Os pedidos abertos possuem a ação "Marcar como Recebido".
 - Ao ser executada:

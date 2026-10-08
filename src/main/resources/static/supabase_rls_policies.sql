@@ -42,6 +42,7 @@ DROP POLICY IF EXISTS "Insercao Movimentacoes por Perfil" ON public.movimentacoe
 
 DROP POLICY IF EXISTS "Leitura Transferencias por Perfil" ON public.transferencias;
 DROP POLICY IF EXISTS "Insercao Transferencias por Perfil" ON public.transferencias;
+DROP POLICY IF EXISTS "Atualizacao Transferencias por Perfil" ON public.transferencias;
 
 DROP POLICY IF EXISTS "Leitura Pedidos Compra por Perfil" ON public.pedidos_compra;
 DROP POLICY IF EXISTS "Insercao Pedidos Compra Apenas Gerente" ON public.pedidos_compra;
@@ -108,6 +109,12 @@ CREATE POLICY "Insercao Transferencias por Perfil" ON public.transferencias
 FOR INSERT WITH CHECK (
   public.get_auth_user_cargo() = 'gerente' OR
   origem_id = public.get_auth_user_filial_id()
+);
+
+CREATE POLICY "Atualizacao Transferencias por Perfil" ON public.transferencias
+FOR UPDATE USING (
+  public.get_auth_user_cargo() = 'gerente' OR
+  destino_id = public.get_auth_user_filial_id()
 );
 
 -- 9. POLÍTICAS DAS TABELAS 'pedidos_compra' E 'itens_pedido_compra'

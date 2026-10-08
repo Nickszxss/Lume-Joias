@@ -22,8 +22,8 @@ async def run():
         await page.wait_for_selector("#app.active", timeout=10000)
 
         # Ir para a página de pedidos
-        await page.click("a[data-page='pedidos']")
-        await page.wait_for_timeout(1000)
+        await page.wait_for_timeout(500)
+        await page.click("#menu a[data-page='pedidos']")
         await page.wait_for_selector("#page-pedidos.active", timeout=5000)
 
         # Abrir modal e criar pedido de 15 unidades para Filial Norte
@@ -88,7 +88,7 @@ async def run():
         # PASSO 3: Verificar Entrada no Estoque da Filial Solicitante (Filial Norte)
         # --------------------------------------------------------
         print("\n--- PASSO 3: Verificando Atualização do Estoque ---")
-        await page.click("a[data-page='estoque']")
+        await page.click("#menu a[data-page='estoque']")
         await page.wait_for_selector("#page-estoque.active", timeout=5000)
         await page.click("#estoque-filiais button:has-text('Norte')")
         await page.wait_for_timeout(500)
@@ -105,7 +105,7 @@ async def run():
         # PASSO 4: Verificar Registro na Tabela de Histórico (Movimentações)
         # --------------------------------------------------------
         print("\n--- PASSO 4: Verificando Histórico de Movimentações ---")
-        await page.click("a[data-page='historico']")
+        await page.click("#menu a[data-page='historico']")
         await page.wait_for_selector("#page-historico.active", timeout=5000)
         await page.wait_for_timeout(1000)
 
@@ -121,9 +121,9 @@ async def run():
         await page.wait_for_selector("#app.active", timeout=10000)
         await page.wait_for_timeout(1000)
 
-        await page.click("a[data-page='pedidos']")
-        await page.wait_for_timeout(1000)
+        await page.click("#menu a[data-page='pedidos']")
         await page.wait_for_selector("#page-pedidos.active", timeout=5000)
+        await page.wait_for_function("document.querySelector('#tbody-pedidos').textContent.includes('#')")
 
         pedidos_f5 = await page.text_content("#tbody-pedidos")
         print("[TEST 5 - Tabela Pós-F5]:\n", pedidos_f5.strip())
@@ -158,7 +158,7 @@ async def run():
         await page.click("button:has-text('Entrar')")
         await page.wait_for_selector("#app.active", timeout=10000)
 
-        await page.click("a[data-page='pedidos']")
+        await page.click("#menu a[data-page='pedidos']")
         await page.wait_for_selector("#page-pedidos.active", timeout=5000)
         await page.wait_for_timeout(500)
 
@@ -171,7 +171,7 @@ async def run():
         await page2.click("button:has-text('Entrar')")
         await page2.wait_for_selector("#app.active", timeout=10000)
 
-        await page2.click("a[data-page='pedidos']")
+        await page2.click("#menu a[data-page='pedidos']")
         await page2.wait_for_selector("#page-pedidos.active", timeout=5000)
         await page2.wait_for_timeout(500)
 

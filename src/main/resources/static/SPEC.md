@@ -62,6 +62,12 @@ Sessão Autenticada
 - **Gerente:** Pode concluir qualquer transferência.
 - **Outras filiais:** Não podem concluir a transferência.
 
+### Atualização em Tempo Real (Supabase Realtime)
+- O sistema utiliza `supabaseClient.channel('sge_realtime_channel')` para escutar alterações em tempo real nas tabelas `estoques`, `movimentacoes`, `transferencias` e `pedidos_compra`.
+- Quando um registro é inserido, atualizado ou excluído por qualquer usuário/dispositivo no Supabase, os eventos `postgres_changes` são capturados instantaneamente no frontend.
+- O manipulador de eventos identifica a página ativa na interface (`#page-dashboard`, `#page-estoque`, `#page-transferencias`, `#page-pedidos`, `#page-alertas`, `#page-historico`) e dispara a renderização reativa sem necessidade de recarregar manualmente a página (F5).
+- A subscrição é iniciada no evento `aplicarLogin` e cancelada com `removeChannel` na execução do `sair`.
+
 ### Recebimento de Pedidos de Compra
 - Os pedidos abertos possuem a ação "Marcar como Recebido".
 - Ao ser executada:

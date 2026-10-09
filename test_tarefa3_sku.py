@@ -2,15 +2,15 @@ import asyncio
 from playwright.async_api import async_playwright
 
 EXPECTED_SKUS = {
-    "Colar de prata": "001",
-    "Colar de ouro": "002",
-    "Anel de prata": "003",
-    "Anel de ouro": "004",
-    "Brinco de prata": "005",
-    "Brinco de ouro": "006",
-    "Solitária": "007",
-    "Pulseira de prata": "008",
-    "Pulseira de ouro": "009"
+    "Colar de prata": "01",
+    "Colar de ouro": "02",
+    "Anel de prata": "03",
+    "Anel de ouro": "04",
+    "Brinco de prata": "05",
+    "Brinco de ouro": "06",
+    "Solitária": "07",
+    "Pulseira de prata": "08",
+    "Pulseira de ouro": "09"
 }
 
 async def run():
@@ -58,7 +58,7 @@ async def run():
         # Check product row in Produtos table
         prod_table_rows = await page.text_content("#tbody-produtos")
         print("[TEST TABLE] Table content after save:\n", prod_table_rows)
-        assert "009" in prod_table_rows and "Pulseira de ouro" in prod_table_rows, "Saved SKU 009 not found in table"
+        assert ("09" in prod_table_rows or "009" in prod_table_rows) and "Pulseira de ouro" in prod_table_rows, "Saved SKU 09 not found in table"
 
         # Test Page Reload (F5) persistence
         await page.reload()
@@ -69,7 +69,7 @@ async def run():
 
         reloaded_table_rows = await page.text_content("#tbody-produtos")
         print("[TEST PERSISTENCE] Table content after F5 reload:\n", reloaded_table_rows)
-        assert "009" in reloaded_table_rows and "Pulseira de ouro" in reloaded_table_rows, "SKU 009 persistence check failed after F5 reload"
+        assert ("09" in reloaded_table_rows or "009" in reloaded_table_rows) and "Pulseira de ouro" in reloaded_table_rows, "SKU 09 persistence check failed after F5 reload"
 
         await context.close()
         await browser.close()

@@ -100,16 +100,17 @@ Sessão Autenticada
 ### Tabela Oficial de SKUs e Regras de Cadastro por Filial
 - O cadastro de produtos exige a escolha obrigatória de uma filial (`filial_id`).
 - O produto criado é associado exclusivamente à filial selecionada (registro único na tabela `estoques`), não sendo propagado automaticamente para as demais filiais.
-- O SKU é preenchido e atualizado automaticamente com preservação dos zeros à esquerda de acordo com o tipo de produto selecionado:
-  - Colar de prata → `001`
-  - Colar de ouro → `002`
-  - Anel de prata → `003`
-  - Anel de ouro → `004`
-  - Brinco de prata → `005`
-  - Brinco de ouro → `006`
-  - Solitária → `007`
-  - Pulseira de prata → `008`
-  - Pulseira de ouro → `009`
+- O SKU-base de 2 dígitos é preenchido e atualizado automaticamente de acordo com o tipo de produto selecionado:
+  - Colar de prata → `01`
+  - Colar de ouro → `02`
+  - Anel de prata → `03`
+  - Anel de ouro → `04`
+  - Brinco de prata → `05`
+  - Brinco de ouro → `06`
+  - Solitária → `07`
+  - Pulseira de prata → `08`
+  - Pulseira de ouro → `09`
+- **Geração de Códigos Exclusivos e Tratamento de Duplicidades:** Ao cadastrar múltiplos produtos do mesmo tipo, o sistema consulta a tabela `produtos` no Supabase e atribui automaticamente um sufixo numérico incremental exclusivo (ex: `03`, `03-1`, `03-2`), respeitando a constraint de unicidade `produtos_codigo_key`. Em caso de rejeição HTTP 409 (código `23505`), o erro é tratado e exibido de forma transparente ao usuário sem recorrer a fallbacks de cadastros fictícios no mock local.
 
 ### Usuários de Teste
 

@@ -371,45 +371,64 @@ const api = {
   criarProduto: async (dados) => {
     const client = getSupabaseClient();
     if (client) {
+      // 1. Determinar SKU exclusivo tratando duplicidades (base, base-1, base-2...)
+      const skuBase = dados.sku || obterSkuPorNome(dados.nome);
+      let codigoFinal = skuBase;
+
+      // Buscar códigos existentes na tabela produtos
+      const { data: prodsExistentes } = await client.from('produtos').select('codigo');
+      if (prodsExistentes && prodsExistentes.length > 0) {
+        const codigosEmUso = new Set(prodsExistentes.map(p => p.codigo));
+        if (codigosEmUso.has(skuBase)) {
+          let contador = 1;
+          while (codigosEmUso.has(`${skuBase}-${contador}`)) {
+            contador++;
+          }
+          codigoFinal = `${skuBase}-${contador}`;
+        }
+      }
+
       const payloadProduto = {
         nome: dados.nome,
-        codigo: dados.sku,
+        codigo: codigoFinal,
         descricao: dados.categoria || 'Geral',
         qtd_minima: dados.qtd_minima || 10,
         unidade_medida: 'unidade',
         ativo: true
       };
-      try {
-        const { data: pData, error: pErr } = await client.from('produtos').insert([payloadProduto]).select().single();
-        if (!pErr && pData) {
-          const prodId = pData.id;
-          const targetFilialId = parseInt(dados.filialId);
-          const initialQtd = 0;
-          const st = 'zerado';
 
-          const estoqueRecord = {
-            produto_id: prodId,
-            filial_id: targetFilialId,
-            quantidade: initialQtd,
-            status: st
-          };
-          await client.from('estoques').insert([estoqueRecord]);
-
-          notificarRealtime('produtos', { id: prodId });
-          notificarRealtime('estoques', { produto_id: prodId, filial_id: targetFilialId });
-          return {
-            id: prodId,
-            sku: dados.sku,
-            nome: dados.nome,
-            categoria: dados.categoria || 'Geral',
-            qtd_minima: dados.qtd_minima || 10,
-            filial_id: targetFilialId
-          };
-        } else if (pErr) {
-          return resolverMockLocal('/produtos', { method: 'POST', body: JSON.stringify(dados) });
+      const { data: pData, error: pErr } = await client.from('produtos').insert([payloadProduto]).select().single();
+      if (pErr) {
+        if (pErr.code === '23505' || pErr.status === 409) {
+          throw new Error('Não foi possível cadastrar o produto porque o código informado já está em uso. Tente novamente com um código exclusivo.');
         }
-      } catch (err) {
-        return resolverMockLocal('/produtos', { method: 'POST', body: JSON.stringify(dados) });
+        throw new Error(pErr.message || 'Erro ao cadastrar produto no Supabase.');
+      }
+
+      if (pData) {
+        const prodId = pData.id;
+        const targetFilialId = parseInt(dados.filialId);
+        const initialQtd = 0;
+        const st = 'zerado';
+
+        const estoqueRecord = {
+          produto_id: prodId,
+          filial_id: targetFilialId,
+          quantidade: initialQtd,
+          status: st
+        };
+        await client.from('estoques').insert([estoqueRecord]);
+
+        notificarRealtime('produtos', { id: prodId });
+        notificarRealtime('estoques', { produto_id: prodId, filial_id: targetFilialId });
+        return {
+          id: prodId,
+          sku: codigoFinal,
+          nome: dados.nome,
+          categoria: dados.categoria || 'Geral',
+          qtd_minima: dados.qtd_minima || 10,
+          filial_id: targetFilialId
+        };
       }
     }
     return apiRequest('/produtos', { method: 'POST', body: JSON.stringify(dados) });
@@ -1680,24 +1699,24 @@ async function inativarPrd(id, btn) {
   }
 }
 const MAPA_SKU = {
-  'Colar de prata': '001',
-  'Colar de ouro': '002',
-  'Anel de prata': '003',
-  'Anel de ouro': '004',
-  'Brinco de prata': '005',
-  'Brinco de ouro': '006',
-  'Solitária': '007',
-  'Pulseira de prata': '008',
-  'Pulseira de ouro': '009'
+  'Colar de prata': '01',
+  'Colar de ouro': '02',
+  'Anel de prata': '03',
+  'Anel de ouro': '04',
+  'Brinco de prata': '05',
+  'Brinco de ouro': '06',
+  'Solitária': '07',
+  'Pulseira de prata': '08',
+  'Pulseira de ouro': '09'
 };
 
 function obterSkuPorNome(nome) {
-  if (!nome) return '001';
+  if (!nome) return '01';
   const nomeLower = nome.trim().toLowerCase();
   for (const [key, val] of Object.entries(MAPA_SKU)) {
     if (key.toLowerCase() === nomeLower) return val;
   }
-  return '001';
+  return '01';
 }
 
 function atualizarSkuPorTipo() {

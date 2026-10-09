@@ -33,7 +33,8 @@ async def run():
         await page.select_option("#pc-filial", value="2") # Filial Norte
         await page.fill("#pc-qtd", "15")
         await page.click("#modal-pedido button:has-text('Criar Pedido')")
-        await page.wait_for_timeout(1000)
+        await page.wait_for_selector("#modal-pedido", state="hidden", timeout=10000)
+        await page.wait_for_timeout(500)
 
         toast1 = await page.text_content("#toast")
         print("[TEST 1 - Criar Pedido Toast]:", toast1.strip())

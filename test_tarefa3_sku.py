@@ -47,8 +47,7 @@ async def run():
         # Now save a product with type 'Pulseira de ouro' (SKU: 009) for Filial Leste (ID 4)
         await page.select_option("#p-nome", value="Pulseira de ouro")
         await page.select_option("#p-filial", value="4") # Filial Leste
-        await page.fill("#p-min", "3")
-        await page.fill("#p-qtd", "12")
+        await page.select_option("#p-min", "10")
         await page.click("#modal-produto button:has-text('Salvar')")
         await page.wait_for_timeout(1000)
 

@@ -24,7 +24,6 @@ async def run():
             await page.goto("http://localhost:8080/index.html")
 
             # Login as Robson (Manager)
-            await page.fill("#login-nome", "Robson")
             await page.fill("#login-email", "robson.grt@empresa.com")
             await page.fill("#login-senha", "etec2026@DS")
             await page.click("button:has-text('Entrar')")

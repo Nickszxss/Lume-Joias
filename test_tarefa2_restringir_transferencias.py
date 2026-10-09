@@ -29,8 +29,7 @@ async def run():
         await page.wait_for_selector("#modal-produto", timeout=5000)
         await page.select_option("#p-nome", value="Brinco de prata") # SKU 005
         await page.select_option("#p-filial", value="2") # Filial Norte
-        await page.fill("#p-min", "5")
-        await page.fill("#p-qtd", "30")
+        await page.select_option("#p-min", "10")
         await page.click("#modal-produto button:has-text('Salvar')")
         await page.wait_for_timeout(1000)
 

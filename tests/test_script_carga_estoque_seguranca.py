@@ -76,7 +76,9 @@ class TestScriptCargaEstoqueSeguranca(unittest.TestCase):
 
     def test_matriz_incorreta_rejeicao(self):
         """Testa se matriz com soma alterada é rejeitada pela pré-validação estática."""
-        with patch.dict("scripts.executar_carga_estoque_supabase.EXPECTED_MATRIX", {"Colar de prata": {"sku": "01", "Centro": 999, "Norte": 15, "Sul": 48, "Leste": 7, "Oeste": 56}}):
+        matriz_corrompida = {k: dict(v) for k, v in EXPECTED_MATRIX.items()}
+        matriz_corrompida["Colar de prata"]["Centro"] = 999
+        with patch("scripts.executar_carga_estoque_supabase.EXPECTED_MATRIX", matriz_corrompida):
             ok, msg = validar_matriz_local()
             self.assertFalse(ok)
             self.assertIn("Total geral divergente", msg)

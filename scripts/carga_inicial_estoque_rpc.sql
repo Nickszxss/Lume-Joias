@@ -1,5 +1,6 @@
 -- =====================================================================
--- CANDIDATO SQL: CARGA INICIAL DE ESTOQUE TRANSACIONAL (LUME-JOIAS) - REVISÃO TAREFA 8
+-- CANDIDATO SQL: CARGA INICIAL DE ESTOQUE TRANSACIONAL (LUME-JOIAS) - REVISÃO TAREFA 15
+-- DISTRIBUIÇÃO DAS 45 MOVIMENTAÇÕES ENTRE OS 3 GERENTES OFICIAIS (IDs 3, 5, 7)
 -- AVISO: ESTRITAMENTE NÃO APLICADO EM PRODUÇÃO NESTA TAREFA.
 -- =====================================================================
 
@@ -11,6 +12,19 @@ CREATE TABLE IF NOT EXISTS public.carga_inicial_controle (
     total_combinacoes INTEGER NOT NULL,
     executado_em TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- Atribuição explícita de propriedade das tabelas/sequências para o papel administrativo
+ALTER TABLE public.carga_inicial_controle OWNER TO postgres;
+ALTER SEQUENCE public.carga_inicial_controle_id_seq OWNER TO postgres;
+
+-- Revogação estrita de privilégios públicos e de papéis cliente-side
+REVOKE ALL ON TABLE public.carga_inicial_controle FROM PUBLIC;
+REVOKE ALL ON TABLE public.carga_inicial_controle FROM anon;
+REVOKE ALL ON TABLE public.carga_inicial_controle FROM authenticated;
+
+REVOKE ALL ON SEQUENCE public.carga_inicial_controle_id_seq FROM PUBLIC;
+REVOKE ALL ON SEQUENCE public.carga_inicial_controle_id_seq FROM anon;
+REVOKE ALL ON SEQUENCE public.carga_inicial_controle_id_seq FROM authenticated;
 
 -- 2. Função Transacional Atômica com SECURITY DEFINER e search_path Estritamente Fixo
 CREATE OR REPLACE FUNCTION public.executar_carga_inicial_estoque_rpc()
@@ -24,6 +38,7 @@ DECLARE
   v_filial_id integer;
   v_qtd integer;
   v_status text;
+  v_gerente_id integer;
   v_prods_criados integer := 0;
   v_estoques_criados integer := 0;
   v_movs_criadas integer := 0;
@@ -31,17 +46,20 @@ DECLARE
   -- Mapeamento Estrito das 5 Filiais Oficiais (ID -> Nome Exato no Banco)
   v_mapa_filiais jsonb := '{"Filial Centro": 1, "Filial Norte": 2, "Filial Sul": 3, "Filial Leste": 4, "Filial Oeste": 5}'::jsonb;
 
-  -- Matriz Imutável dos 9 Produtos Oficiais (45 combinações = 1.392 unidades)
+  -- Matriz Imutável dos 9 Produtos Oficiais com atribuição de Gerente (IDs 3, 5 e 7)
+  -- Gerente ID 3 (Sul): Produtos 01, 02, 03 (15 movimentações)
+  -- Gerente ID 5 (Oeste): Produtos 04, 05, 06 (15 movimentações)
+  -- Gerente ID 7 (Leste): Produtos 07, 08, 09 (15 movimentações)
   v_matrix jsonb := '{
-    "Colar de prata": {"sku": "01", "Filial Centro": 32, "Filial Norte": 15, "Filial Sul": 48, "Filial Leste": 7, "Filial Oeste": 56},
-    "Colar de ouro": {"sku": "02", "Filial Centro": 12, "Filial Norte": 41, "Filial Sul": 23, "Filial Leste": 59, "Filial Oeste": 5},
-    "Anel de prata": {"sku": "03", "Filial Centro": 54, "Filial Norte": 28, "Filial Sul": 9, "Filial Leste": 36, "Filial Oeste": 17},
-    "Anel de ouro": {"sku": "04", "Filial Centro": 21, "Filial Norte": 63, "Filial Sul": 14, "Filial Leste": 44, "Filial Oeste": 30},
-    "Brinco de prata": {"sku": "05", "Filial Centro": 46, "Filial Norte": 8, "Filial Sul": 35, "Filial Leste": 19, "Filial Oeste": 61},
-    "Brinco de ouro": {"sku": "06", "Filial Centro": 6, "Filial Norte": 52, "Filial Sul": 27, "Filial Leste": 38, "Filial Oeste": 13},
-    "Solitária": {"sku": "07", "Filial Centro": 39, "Filial Norte": 18, "Filial Sul": 64, "Filial Leste": 11, "Filial Oeste": 25},
-    "Pulseira de prata": {"sku": "08", "Filial Centro": 16, "Filial Norte": 43, "Filial Sul": 3, "Filial Leste": 57, "Filial Oeste": 31},
-    "Pulseira de ouro": {"sku": "09", "Filial Centro": 60, "Filial Norte": 24, "Filial Sul": 33, "Filial Leste": 2, "Filial Oeste": 47}
+    "Colar de prata": {"sku": "01", "gerente_id": 3, "Filial Centro": 32, "Filial Norte": 15, "Filial Sul": 48, "Filial Leste": 7, "Filial Oeste": 56},
+    "Colar de ouro": {"sku": "02", "gerente_id": 3, "Filial Centro": 12, "Filial Norte": 41, "Filial Sul": 23, "Filial Leste": 59, "Filial Oeste": 5},
+    "Anel de prata": {"sku": "03", "gerente_id": 3, "Filial Centro": 54, "Filial Norte": 28, "Filial Sul": 9, "Filial Leste": 36, "Filial Oeste": 17},
+    "Anel de ouro": {"sku": "04", "gerente_id": 5, "Filial Centro": 21, "Filial Norte": 63, "Filial Sul": 14, "Filial Leste": 44, "Filial Oeste": 30},
+    "Brinco de prata": {"sku": "05", "gerente_id": 5, "Filial Centro": 46, "Filial Norte": 8, "Filial Sul": 35, "Filial Leste": 19, "Filial Oeste": 61},
+    "Brinco de ouro": {"sku": "06", "gerente_id": 5, "Filial Centro": 6, "Filial Norte": 52, "Filial Sul": 27, "Filial Leste": 38, "Filial Oeste": 13},
+    "Solitária": {"sku": "07", "gerente_id": 7, "Filial Centro": 39, "Filial Norte": 18, "Filial Sul": 64, "Filial Leste": 11, "Filial Oeste": 25},
+    "Pulseira de prata": {"sku": "08", "gerente_id": 7, "Filial Centro": 16, "Filial Norte": 43, "Filial Sul": 3, "Filial Leste": 57, "Filial Oeste": 31},
+    "Pulseira de ouro": {"sku": "09", "gerente_id": 7, "Filial Centro": 60, "Filial Norte": 24, "Filial Sul": 33, "Filial Leste": 2, "Filial Oeste": 47}
   }'::jsonb;
 
   k_prod text;
@@ -49,13 +67,16 @@ DECLARE
   v_prod_obj jsonb;
 
   -- Variáveis de Checagem Físicas Individuais das 45 Combinações
-  r_check RECORD;
   v_cnt_comb_invalidas integer := 0;
   v_cnt_movs_invalidas integer := 0;
+  v_cnt_total_estoque_par integer := 0;
   v_cnt_prods integer;
-  v_cnt_estoques integer;
-  v_cnt_movs integer;
+  v_cnt_estoques_extras integer;
+  v_cnt_movs_extras integer;
   v_sum_unidades integer;
+  v_movs_gerente_3 integer := 0;
+  v_movs_gerente_5 integer := 0;
+  v_movs_gerente_7 integer := 0;
 BEGIN
   -- A. Trava de Concorrência (Advisory Lock Transacional Único)
   IF NOT pg_catalog.pg_try_advisory_xact_lock(88998899) THEN
@@ -67,7 +88,14 @@ BEGIN
     RAISE EXCEPTION 'OPERAÇÃO BLOQUEADA: A carga inicial oficial já foi executada e registrada em carga_inicial_controle anteriormente.';
   END IF;
 
-  -- C. Validação Estrita das 5 Filiais Oficiais (ID, Nome Exato e Estado Ativo)
+  -- C. Validação Estrita dos 3 Gerentes Oficiais (IDs 3, 5 e 7 Ativos com Cargo/Tipo Gerente)
+  IF (SELECT count(*) FROM public.usuarios WHERE id = 3 AND (cargo = 'gerente' OR tipo = 'gerente') AND ativo = true) <> 1 OR
+     (SELECT count(*) FROM public.usuarios WHERE id = 5 AND (cargo = 'gerente' OR tipo = 'gerente') AND ativo = true) <> 1 OR
+     (SELECT count(*) FROM public.usuarios WHERE id = 7 AND (cargo = 'gerente' OR tipo = 'gerente') AND ativo = true) <> 1 THEN
+    RAISE EXCEPTION 'OPERAÇÃO ABORTADA: Os 3 gerentes oficiais (IDs 3, 5 e 7 ativos) não foram encontrados ou validados no banco.';
+  END IF;
+
+  -- D. Validação Estrita das 5 Filiais Oficiais
   IF (SELECT count(*) FROM public.filiais WHERE id = 1 AND nome = 'Filial Centro' AND ativa = true) <> 1 OR
      (SELECT count(*) FROM public.filiais WHERE id = 2 AND nome = 'Filial Norte' AND ativa = true) <> 1 OR
      (SELECT count(*) FROM public.filiais WHERE id = 3 AND nome = 'Filial Sul' AND ativa = true) <> 1 OR
@@ -76,19 +104,19 @@ BEGIN
     RAISE EXCEPTION 'OPERAÇÃO ABORTADA: As 5 filiais oficiais (IDs 1 a 5 com nomes exatos e ativas = true) não foram encontradas no banco.';
   END IF;
 
-  -- D. Validação de Conflitos Prévia
-  -- D.1. Conflito nos SKUs Oficiais
+  -- E. Validação de Conflitos Prévia
   IF EXISTS (SELECT 1 FROM public.produtos WHERE codigo IN ('01','02','03','04','05','06','07','08','09')) THEN
     RAISE EXCEPTION 'OPERAÇÃO ABORTADA: Conflito de dados. Já existem produtos cadastrados no banco com os SKUs oficiais (01 a 09).';
   END IF;
 
-  -- D.2. Conflito de Histórico Parcial Prévia
   IF EXISTS (SELECT 1 FROM public.movimentacoes WHERE motivo = 'CARGA_INICIAL_OFFICIAL_1392_V1') THEN
     RAISE EXCEPTION 'OPERAÇÃO ABORTADA: Estado parcial detectado. Já existem registros de movimentação com o identificador da carga.';
   END IF;
 
-  -- E. Iterar Matriz e Cadastrar sem ON CONFLICT DO UPDATE
+  -- F. Iterar Matriz e Cadastrar Produtos, Estoques e Movimentações com usuario_id NOT NULL do Gerente
   FOR k_prod, v_prod_obj IN SELECT * FROM jsonb_each(v_matrix) LOOP
+    v_gerente_id := (v_prod_obj->>'gerente_id')::integer;
+
     INSERT INTO public.produtos (nome, codigo, descricao, unidade_medida, qtd_minima, ativo)
     VALUES (k_prod, v_prod_obj->>'sku', 'Geral', 'unidade', 10, true)
     RETURNING id INTO v_prod_id;
@@ -96,7 +124,7 @@ BEGIN
     v_prods_criados := v_prods_criados + 1;
 
     FOR k_filial IN SELECT jsonb_object_keys(v_prod_obj) LOOP
-      IF k_filial = 'sku' THEN CONTINUE; END IF;
+      IF k_filial = 'sku' OR k_filial = 'gerente_id' THEN CONTINUE; END IF;
 
       v_filial_id := (v_mapa_filiais->>k_filial)::integer;
       v_qtd := (v_prod_obj->>k_filial)::integer;
@@ -108,64 +136,96 @@ BEGIN
 
       v_estoques_criados := v_estoques_criados + 1;
 
-      -- Inserção Rígida no Histórico (usuario_id NULO por ser operacao do sistema)
+      -- Inserção Rígida no Histórico com usuario_id OBRIGATÓRIO (NOT NULL)
       INSERT INTO public.movimentacoes (produto_id, filial_id, tipo, quantidade, quantidade_anterior, quantidade_nova, usuario_id, motivo, created_at)
-      VALUES (v_prod_id, v_filial_id, 'entrada', v_qtd, 0, v_qtd, NULL, 'CARGA_INICIAL_OFFICIAL_1392_V1', pg_catalog.now());
+      VALUES (v_prod_id, v_filial_id, 'entrada', v_qtd, 0, v_qtd, v_gerente_id, 'CARGA_INICIAL_OFFICIAL_1392_V1', pg_catalog.now());
 
       v_movs_criadas := v_movs_criadas + 1;
     END LOOP;
   END LOOP;
 
-  -- F. Validação Física Individual de Cada uma das 45 Combinações Gravadas no Banco
+  -- G. Validação Física Itemizada das 45 Combinações e Distribuição por Gerente
   FOR k_prod, v_prod_obj IN SELECT * FROM jsonb_each(v_matrix) LOOP
+    v_gerente_id := (v_prod_obj->>'gerente_id')::integer;
     SELECT id INTO v_prod_id FROM public.produtos WHERE codigo = v_prod_obj->>'sku';
 
     FOR k_filial IN SELECT jsonb_object_keys(v_prod_obj) LOOP
-      IF k_filial = 'sku' THEN CONTINUE; END IF;
+      IF k_filial = 'sku' OR k_filial = 'gerente_id' THEN CONTINUE; END IF;
 
       v_filial_id := (v_mapa_filiais->>k_filial)::integer;
       v_qtd := (v_prod_obj->>k_filial)::integer;
       v_status := CASE WHEN v_qtd = 0 THEN 'zerado' WHEN v_qtd <= 10 THEN 'baixo' ELSE 'suficiente' END;
 
-      -- F.1 Verificar se existe EXATAMENTE UM registro em estoques para este produto/filial com quantidade e status corretos
+      -- G.1 Verificar registro único em estoques
+      SELECT count(*) INTO v_cnt_total_estoque_par FROM public.estoques WHERE produto_id = v_prod_id AND filial_id = v_filial_id;
+      IF v_cnt_total_estoque_par <> 1 THEN
+        v_cnt_comb_invalidas := v_cnt_comb_invalidas + 1;
+      END IF;
+
+      -- G.2 Verificar se o único registro possui quantidade e status exatamente iguais à matriz
       IF (SELECT count(*) FROM public.estoques WHERE produto_id = v_prod_id AND filial_id = v_filial_id AND quantidade = v_qtd AND status = v_status) <> 1 THEN
         v_cnt_comb_invalidas := v_cnt_comb_invalidas + 1;
       END IF;
 
-      -- F.2 Verificar se existe EXATAMENTE UM registro em movimentacoes para este produto/filial com entrada, ant=0, nova=qtd
-      IF (SELECT count(*) FROM public.movimentacoes WHERE produto_id = v_prod_id AND filial_id = v_filial_id AND tipo = 'entrada' AND quantidade = v_qtd AND quantidade_anterior = 0 AND quantidade_nova = v_qtd AND motivo = 'CARGA_INICIAL_OFFICIAL_1392_V1') <> 1 THEN
+      -- G.3 Verificar se existe EXATAMENTE UM registro em movimentacoes vinculado ao GERENTE CORRETO
+      IF (SELECT count(*) FROM public.movimentacoes WHERE produto_id = v_prod_id AND filial_id = v_filial_id AND tipo = 'entrada' AND quantidade = v_qtd AND quantidade_anterior = 0 AND quantidade_nova = v_qtd AND usuario_id = v_gerente_id AND motivo = 'CARGA_INICIAL_OFFICIAL_1392_V1') <> 1 THEN
         v_cnt_movs_invalidas := v_cnt_movs_invalidas + 1;
       END IF;
     END LOOP;
   END LOOP;
 
+  -- H. Conferir Distribuição Exata de 15 Movimentações por Gerente
+  SELECT count(*) INTO v_movs_gerente_3 FROM public.movimentacoes WHERE usuario_id = 3 AND motivo = 'CARGA_INICIAL_OFFICIAL_1392_V1';
+  SELECT count(*) INTO v_movs_gerente_5 FROM public.movimentacoes WHERE usuario_id = 5 AND motivo = 'CARGA_INICIAL_OFFICIAL_1392_V1';
+  SELECT count(*) INTO v_movs_gerente_7 FROM public.movimentacoes WHERE usuario_id = 7 AND motivo = 'CARGA_INICIAL_OFFICIAL_1392_V1';
+
+  IF v_movs_gerente_3 <> 15 OR v_movs_gerente_5 <> 15 OR v_movs_gerente_7 <> 15 THEN
+    RAISE EXCEPTION 'FALHA NA DISTRIBUIÇÃO DOS GERENTES: Esperado 15 movimentações por gerente (Obtido -> Gerente 3: %, Gerente 5: %, Gerente 7: %).',
+      v_movs_gerente_3, v_movs_gerente_5, v_movs_gerente_7;
+  END IF;
+
+  -- I. Checagem Rigorosa de Ausência de Registros Extras
+  SELECT count(*) INTO v_cnt_estoques_extras
+  FROM public.estoques
+  WHERE produto_id IN (SELECT id FROM public.produtos WHERE codigo IN ('01','02','03','04','05','06','07','08','09'));
+
+  SELECT count(*) INTO v_cnt_movs_extras
+  FROM public.movimentacoes
+  WHERE motivo = 'CARGA_INICIAL_OFFICIAL_1392_V1';
+
+  IF v_cnt_estoques_extras <> 45 OR v_cnt_movs_extras <> 45 THEN
+    RAISE EXCEPTION 'FALHA NA ASSERTION DE REGISTROS EXTRAS: Detectados registros duplicados ou extras nos produtos da carga inicial (Estoques: %, Movimentações: %).',
+      v_cnt_estoques_extras, v_cnt_movs_extras;
+  END IF;
+
   IF v_cnt_comb_invalidas > 0 OR v_cnt_movs_invalidas > 0 THEN
-    RAISE EXCEPTION 'FALHA NA ASSERTION ITEMIZADA DAS 45 COMBINAÇÕES: Combinações inválidas detectadas no banco (Estoques: %, Movimentações: %).',
-      v_cnt_comb_invalidas, v_cnt_movs_invalidas;
+    RAISE EXCEPTION 'FALHA NA ASSERTION ITEMIZADA DAS 45 COMBINAÇÕES: Combinações ou atribuições de gerente inválidas detectadas.';
   END IF;
 
-  -- G. Validações Globais de Totais Físicos do Banco
+  -- J. Validações Globais
   SELECT count(*) INTO v_cnt_prods FROM public.produtos WHERE codigo IN ('01','02','03','04','05','06','07','08','09');
-  SELECT count(*), COALESCE(sum(quantidade),0) INTO v_cnt_estoques, v_sum_unidades FROM public.estoques WHERE produto_id IN (SELECT id FROM public.produtos WHERE codigo IN ('01','02','03','04','05','06','07','08','09'));
-  SELECT count(*) INTO v_cnt_movs FROM public.movimentacoes WHERE motivo = 'CARGA_INICIAL_OFFICIAL_1392_V1';
+  SELECT COALESCE(sum(quantidade),0) INTO v_sum_unidades FROM public.estoques WHERE produto_id IN (SELECT id FROM public.produtos WHERE codigo IN ('01','02','03','04','05','06','07','08','09'));
 
-  IF v_cnt_prods <> 9 OR v_cnt_estoques <> 45 OR v_cnt_movs <> 45 OR v_sum_unidades <> 1392 THEN
-    RAISE EXCEPTION 'FALHA NA ASSERTION DE TOTAIS GLOBAIS: Dados persistidos divergem dos totais da matriz oficial (Prods: %, Ests: %, Movs: %, Sum: %).',
-      v_cnt_prods, v_cnt_estoques, v_cnt_movs, v_sum_unidades;
+  IF v_cnt_prods <> 9 OR v_sum_unidades <> 1392 THEN
+    RAISE EXCEPTION 'FALHA NA ASSERTION DE TOTAIS GLOBAIS: Dados persistidos divergem dos totais da matriz oficial.';
   END IF;
 
-  -- H. Gravar Registro de Controle de Idempotência
+  -- K. Registro de Controle de Idempotência
   INSERT INTO public.carga_inicial_controle (identificador_carga, total_unidades, total_combinacoes)
   VALUES ('CARGA_INICIAL_OFFICIAL_1392_V1', 1392, 45);
 
-  -- I. Retorno de Sucesso
   RETURN jsonb_build_object(
     'sucesso', true,
     'produtos_criados', v_cnt_prods,
-    'estoques_criados', v_cnt_estoques,
-    'movimentacoes_criadas', v_cnt_movs,
+    'estoques_criados', v_cnt_estoques_extras,
+    'movimentacoes_criadas', v_cnt_movs_extras,
+    'distribuicao_gerentes', jsonb_build_object(
+      'gerente_id_3', v_movs_gerente_3,
+      'gerente_id_5', v_movs_gerente_5,
+      'gerente_id_7', v_movs_gerente_7
+    ),
     'total_unidades', v_sum_unidades,
-    'mensagem', 'Carga inicial executada e validada item a item com sucesso no banco de dados.'
+    'mensagem', 'Carga inicial executada e distribuída entre os 3 gerentes com sucesso no banco de dados.'
   );
 
 EXCEPTION WHEN OTHERS THEN
@@ -173,7 +233,10 @@ EXCEPTION WHEN OTHERS THEN
 END;
 $$;
 
--- Restrição de Autorização e Privilégios Mínimos
+-- Atribuição explícita do proprietário da função RPC para postgres
+ALTER FUNCTION public.executar_carga_inicial_estoque_rpc() OWNER TO postgres;
+
+-- Restrição de Autorização e Privilégios Mínimos na RPC
 REVOKE ALL ON FUNCTION public.executar_carga_inicial_estoque_rpc() FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.executar_carga_inicial_estoque_rpc() FROM anon;
 REVOKE ALL ON FUNCTION public.executar_carga_inicial_estoque_rpc() FROM authenticated;

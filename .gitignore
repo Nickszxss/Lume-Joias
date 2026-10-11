@@ -39,3 +39,7 @@ spring_app.log
 backups/
 *.json
 !package.json
+
+### Python Bytecode ###
+__pycache__/
+*.pyc

@@ -1,6 +1,7 @@
 import os
 import sys
 import unittest
+from unittest.mock import patch, MagicMock
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
@@ -72,6 +73,13 @@ class TestScriptCargaEstoqueSeguranca(unittest.TestCase):
         self.assertEqual(totais_calculados["Filial Leste"], 273)
         self.assertEqual(totais_calculados["Filial Oeste"], 285)
         self.assertEqual(sum(totais_calculados.values()), 1392)
+
+    def test_matriz_incorreta_rejeicao(self):
+        """Testa se matriz com soma alterada é rejeitada pela pré-validação estática."""
+        with patch.dict("scripts.executar_carga_estoque_supabase.EXPECTED_MATRIX", {"Colar de prata": {"sku": "01", "Centro": 999, "Norte": 15, "Sul": 48, "Leste": 7, "Oeste": 56}}):
+            ok, msg = validar_matriz_local()
+            self.assertFalse(ok)
+            self.assertIn("Total geral divergente", msg)
 
 
 if __name__ == "__main__":

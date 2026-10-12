@@ -86,7 +86,7 @@ BEGIN
     RAISE EXCEPTION 'OPERAÇÃO CONCORRENTE DETECTADA: Outra transação de carga inicial está em andamento.';
   END IF;
 
-  -- B.1 Validação Estrutural Completa da Tabela de Controle Preexistente, Sequência, Tipos e Restrições
+  -- B.1 Validação Estrutural Completa da Tabela de Controle Preexistente, Sequência, PK, UNIQUE, DEFAULT e Tipos
   IF EXISTS (SELECT 1 FROM pg_catalog.pg_tables WHERE schemaname = 'public' AND tablename = 'carga_inicial_controle') THEN
     IF NOT EXISTS (
       SELECT 1 FROM information_schema.columns
@@ -108,8 +108,22 @@ BEGIN
       SELECT 1 FROM information_schema.columns
       WHERE table_schema = 'public' AND table_name = 'carga_inicial_controle'
         AND column_name = 'executado_em' AND data_type LIKE '%timestamp%' AND is_nullable = 'NO'
+    ) OR NOT EXISTS (
+      SELECT 1 FROM information_schema.table_constraints tc
+      JOIN information_schema.constraint_column_usage ccu ON tc.constraint_name = ccu.constraint_name AND tc.table_schema = ccu.table_schema
+      WHERE tc.table_schema = 'public' AND tc.table_name = 'carga_inicial_controle'
+        AND tc.constraint_type = 'PRIMARY KEY' AND ccu.column_name = 'id'
+    ) OR NOT EXISTS (
+      SELECT 1 FROM information_schema.table_constraints tc
+      JOIN information_schema.constraint_column_usage ccu ON tc.constraint_name = ccu.constraint_name AND tc.table_schema = ccu.table_schema
+      WHERE tc.table_schema = 'public' AND tc.table_name = 'carga_inicial_controle'
+        AND tc.constraint_type = 'UNIQUE' AND ccu.column_name = 'identificador_carga'
+    ) OR NOT EXISTS (
+      SELECT 1 FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = 'carga_inicial_controle'
+        AND column_name = 'id' AND column_default LIKE '%carga_inicial_controle_id_seq%'
     ) THEN
-      RAISE EXCEPTION 'OPERAÇÃO ABORTADA: Tabela public.carga_inicial_controle preexistente é incompatível com o esquema esperado (tipos ou restrições divergentes).';
+      RAISE EXCEPTION 'OPERAÇÃO ABORTADA: Tabela public.carga_inicial_controle preexistente é incompatível com o esquema esperado (chave primária em id, restrição UNIQUE em identificador_carga, default de sequência ou tipos divergentes).';
     END IF;
   END IF;
 

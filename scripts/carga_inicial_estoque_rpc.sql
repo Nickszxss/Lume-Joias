@@ -5,8 +5,10 @@
 -- =====================================================================
 
 -- 1. Tabela de Controle de Idempotência Imutável
+CREATE SEQUENCE IF NOT EXISTS public.carga_inicial_controle_id_seq;
+
 CREATE TABLE IF NOT EXISTS public.carga_inicial_controle (
-    id SERIAL PRIMARY KEY,
+    id INTEGER PRIMARY KEY DEFAULT nextval('public.carga_inicial_controle_id_seq'),
     identificador_carga TEXT UNIQUE NOT NULL,
     total_unidades INTEGER NOT NULL,
     total_combinacoes INTEGER NOT NULL,
@@ -16,6 +18,7 @@ CREATE TABLE IF NOT EXISTS public.carga_inicial_controle (
 -- Atribuição explícita de propriedade das tabelas/sequências para o papel administrativo
 ALTER TABLE public.carga_inicial_controle OWNER TO postgres;
 ALTER SEQUENCE public.carga_inicial_controle_id_seq OWNER TO postgres;
+ALTER SEQUENCE public.carga_inicial_controle_id_seq OWNED BY public.carga_inicial_controle.id;
 
 -- Revogação estrita de privilégios públicos e de papéis cliente-side
 REVOKE ALL ON TABLE public.carga_inicial_controle FROM PUBLIC;
@@ -83,16 +86,47 @@ BEGIN
     RAISE EXCEPTION 'OPERAÇÃO CONCORRENTE DETECTADA: Outra transação de carga inicial está em andamento.';
   END IF;
 
-  -- B. Trava de Idempotência na Tabela de Controle
+  -- B.1 Validação Estrutural Completa da Tabela de Controle Preexistente, Sequência, Tipos e Restrições
+  IF EXISTS (SELECT 1 FROM pg_catalog.pg_tables WHERE schemaname = 'public' AND tablename = 'carga_inicial_controle') THEN
+    IF NOT EXISTS (
+      SELECT 1 FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = 'carga_inicial_controle'
+        AND column_name = 'id' AND data_type IN ('integer', 'bigint')
+    ) OR NOT EXISTS (
+      SELECT 1 FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = 'carga_inicial_controle'
+        AND column_name = 'identificador_carga' AND data_type IN ('text', 'character varying') AND is_nullable = 'NO'
+    ) OR NOT EXISTS (
+      SELECT 1 FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = 'carga_inicial_controle'
+        AND column_name = 'total_unidades' AND data_type = 'integer' AND is_nullable = 'NO'
+    ) OR NOT EXISTS (
+      SELECT 1 FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = 'carga_inicial_controle'
+        AND column_name = 'total_combinacoes' AND data_type = 'integer' AND is_nullable = 'NO'
+    ) OR NOT EXISTS (
+      SELECT 1 FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = 'carga_inicial_controle'
+        AND column_name = 'executado_em' AND data_type LIKE '%timestamp%' AND is_nullable = 'NO'
+    ) THEN
+      RAISE EXCEPTION 'OPERAÇÃO ABORTADA: Tabela public.carga_inicial_controle preexistente é incompatível com o esquema esperado (tipos ou restrições divergentes).';
+    END IF;
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_sequences WHERE schemaname = 'public' AND sequencename = 'carga_inicial_controle_id_seq') THEN
+    RAISE EXCEPTION 'OPERAÇÃO ABORTADA: Sequência public.carga_inicial_controle_id_seq não encontrada no esquema público.';
+  END IF;
+
+  -- B.2 Trava de Idempotência na Tabela de Controle
   IF EXISTS (SELECT 1 FROM public.carga_inicial_controle WHERE identificador_carga = 'CARGA_INICIAL_OFFICIAL_1392_V1') THEN
     RAISE EXCEPTION 'OPERAÇÃO BLOQUEADA: A carga inicial oficial já foi executada e registrada em carga_inicial_controle anteriormente.';
   END IF;
 
-  -- C. Validação Estrita dos 3 Gerentes Oficiais (IDs 3, 5 e 7 Ativos com Cargo/Tipo Gerente)
-  IF (SELECT count(*) FROM public.usuarios WHERE id = 3 AND (cargo = 'gerente' OR tipo = 'gerente') AND ativo = true) <> 1 OR
-     (SELECT count(*) FROM public.usuarios WHERE id = 5 AND (cargo = 'gerente' OR tipo = 'gerente') AND ativo = true) <> 1 OR
-     (SELECT count(*) FROM public.usuarios WHERE id = 7 AND (cargo = 'gerente' OR tipo = 'gerente') AND ativo = true) <> 1 THEN
-    RAISE EXCEPTION 'OPERAÇÃO ABORTADA: Os 3 gerentes oficiais (IDs 3, 5 e 7 ativos) não foram encontrados ou validados no banco.';
+  -- C. Validação Estrita dos 3 Gerentes Oficiais (IDs 3, 5 e 7 Ativos com cargo = gerente E tipo = gerente e Filiais Correspondentes)
+  IF (SELECT count(*) FROM public.usuarios WHERE id = 3 AND filial_id = 3 AND cargo = 'gerente' AND tipo = 'gerente' AND ativo = true) <> 1 OR
+     (SELECT count(*) FROM public.usuarios WHERE id = 5 AND filial_id = 5 AND cargo = 'gerente' AND tipo = 'gerente' AND ativo = true) <> 1 OR
+     (SELECT count(*) FROM public.usuarios WHERE id = 7 AND filial_id = 4 AND cargo = 'gerente' AND tipo = 'gerente' AND ativo = true) <> 1 THEN
+    RAISE EXCEPTION 'OPERAÇÃO ABORTADA: Os 3 gerentes oficiais (IDs 3 [Filial 3], 5 [Filial 5] e 7 [Filial 4] ativos com cargo=gerente e tipo=gerente) não foram encontrados ou validados no banco.';
   END IF;
 
   -- D. Validação Estrita das 5 Filiais Oficiais
@@ -130,15 +164,15 @@ BEGIN
       v_qtd := (v_prod_obj->>k_filial)::integer;
       v_status := CASE WHEN v_qtd = 0 THEN 'zerado' WHEN v_qtd <= 10 THEN 'baixo' ELSE 'suficiente' END;
 
-      -- Inserção Rígida em Estoques (Sem ON CONFLICT DO UPDATE)
+      -- Inserção Rígida em Estoques com coerção dinâmica/explícita para o tipo real (enum/text)
       INSERT INTO public.estoques (produto_id, filial_id, quantidade, status, updated_at)
-      VALUES (v_prod_id, v_filial_id, v_qtd, v_status, pg_catalog.now());
+      VALUES (v_prod_id, v_filial_id, v_qtd, v_status::public.status_estoque, pg_catalog.now());
 
       v_estoques_criados := v_estoques_criados + 1;
 
-      -- Inserção Rígida no Histórico com usuario_id OBRIGATÓRIO (NOT NULL)
+      -- Inserção Rígida no Histórico com usuario_id OBRIGATÓRIO (NOT NULL) e coerção para tipo movimentação
       INSERT INTO public.movimentacoes (produto_id, filial_id, tipo, quantidade, quantidade_anterior, quantidade_nova, usuario_id, motivo, created_at)
-      VALUES (v_prod_id, v_filial_id, 'entrada', v_qtd, 0, v_qtd, v_gerente_id, 'CARGA_INICIAL_OFFICIAL_1392_V1', pg_catalog.now());
+      VALUES (v_prod_id, v_filial_id, 'entrada'::public.tipo_movimentacao, v_qtd, 0, v_qtd, v_gerente_id, 'CARGA_INICIAL_OFFICIAL_1392_V1', pg_catalog.now());
 
       v_movs_criadas := v_movs_criadas + 1;
     END LOOP;
@@ -162,13 +196,13 @@ BEGIN
         v_cnt_comb_invalidas := v_cnt_comb_invalidas + 1;
       END IF;
 
-      -- G.2 Verificar se o único registro possui quantidade e status exatamente iguais à matriz
-      IF (SELECT count(*) FROM public.estoques WHERE produto_id = v_prod_id AND filial_id = v_filial_id AND quantidade = v_qtd AND status = v_status) <> 1 THEN
+      -- G.2 Verificar se o único registro possui quantidade e status exatamente iguais à matriz (com coerção para compatibilidade enum/text)
+      IF (SELECT count(*) FROM public.estoques WHERE produto_id = v_prod_id AND filial_id = v_filial_id AND quantidade = v_qtd AND status::text = v_status) <> 1 THEN
         v_cnt_comb_invalidas := v_cnt_comb_invalidas + 1;
       END IF;
 
-      -- G.3 Verificar se existe EXATAMENTE UM registro em movimentacoes vinculado ao GERENTE CORRETO
-      IF (SELECT count(*) FROM public.movimentacoes WHERE produto_id = v_prod_id AND filial_id = v_filial_id AND tipo = 'entrada' AND quantidade = v_qtd AND quantidade_anterior = 0 AND quantidade_nova = v_qtd AND usuario_id = v_gerente_id AND motivo = 'CARGA_INICIAL_OFFICIAL_1392_V1') <> 1 THEN
+      -- G.3 Verificar se existe EXATAMENTE UM registro em movimentacoes vinculado ao GERENTE CORRETO (com coerção para tipo enum/text)
+      IF (SELECT count(*) FROM public.movimentacoes WHERE produto_id = v_prod_id AND filial_id = v_filial_id AND tipo::text = 'entrada' AND quantidade = v_qtd AND quantidade_anterior = 0 AND quantidade_nova = v_qtd AND usuario_id = v_gerente_id AND motivo = 'CARGA_INICIAL_OFFICIAL_1392_V1') <> 1 THEN
         v_cnt_movs_invalidas := v_cnt_movs_invalidas + 1;
       END IF;
     END LOOP;

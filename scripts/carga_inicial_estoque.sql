@@ -42,9 +42,13 @@ DECLARE
   v_prod_obj jsonb;
   v_grupo_mgr text;
 BEGIN
-  -- 1. VALIDAÇÃO DAS 5 FILIAIS OFICIAIS
-  IF (SELECT count(*) FROM public.filiais WHERE id IN (1, 2, 3, 4, 5) AND ativa = true) <> 5 THEN
-    RAISE EXCEPTION 'ABORTADO: As 5 filiais oficiais (IDs 1 a 5, ativas) não foram encontradas na tabela public.filiais.';
+  -- 1. VALIDAÇÃO DAS 5 FILIAIS OFICIAIS (ID x NOME EXATO E STATUS ATIVO)
+  IF (SELECT count(*) FROM public.filiais WHERE id = 1 AND nome = 'Filial Centro' AND ativa = true) <> 1 OR
+     (SELECT count(*) FROM public.filiais WHERE id = 2 AND nome = 'Filial Norte' AND ativa = true) <> 1 OR
+     (SELECT count(*) FROM public.filiais WHERE id = 3 AND nome = 'Filial Sul' AND ativa = true) <> 1 OR
+     (SELECT count(*) FROM public.filiais WHERE id = 4 AND nome = 'Filial Leste' AND ativa = true) <> 1 OR
+     (SELECT count(*) FROM public.filiais WHERE id = 5 AND nome = 'Filial Oeste' AND ativa = true) <> 1 THEN
+    RAISE EXCEPTION 'ABORTADO: As 5 filiais oficiais (ID 1: Filial Centro, ID 2: Filial Norte, ID 3: Filial Sul, ID 4: Filial Leste, ID 5: Filial Oeste) ativas não foram encontradas ou validadas na tabela public.filiais.';
   END IF;
 
   -- 2. VALIDAÇÃO E RESOLUÇÃO DOS GERENTES ATIVOS PARA AS MOVIMENTAÇÕES

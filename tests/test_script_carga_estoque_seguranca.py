@@ -83,6 +83,18 @@ class TestScriptCargaEstoqueSeguranca(unittest.TestCase):
             self.assertFalse(ok)
             self.assertIn("Total geral divergente", msg)
 
+    def test_arquivo_sql_carga_inicial_existe(self):
+        """Testa se o arquivo SQL de carga inicial existe e possui o bloco DO $$."""
+        sql_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "scripts", "carga_inicial_estoque.sql"))
+        self.assertTrue(os.path.exists(sql_path), "O arquivo scripts/carga_inicial_estoque.sql não foi encontrado.")
+        with open(sql_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        self.assertIn("DO $$", content)
+        self.assertIn("1392", content)
+        self.assertIn("public.produtos", content)
+        self.assertIn("public.estoques", content)
+        self.assertIn("public.movimentacoes", content)
+
 
 if __name__ == "__main__":
     unittest.main()

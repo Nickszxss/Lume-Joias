@@ -44,6 +44,8 @@ class TestScriptLimpezaSeguranca(unittest.TestCase):
 
     def test_backup_real_producao(self):
         """Testa diretamente a validação do arquivo de backup real em backups/backup_sge_lume_joias_2026-10-10_17-23-07.json."""
+        if not os.path.exists(BACKUP_FILE_PATH):
+            self.skipTest("Arquivo de backup local não encontrado (ignorado via .gitignore).")
         ok, msg = validar_backup(BACKUP_FILE_PATH)
         self.assertTrue(ok, f"Backup real de produção falhou na validação: {msg}")
         self.assertIn("Backup validado com sucesso", msg)

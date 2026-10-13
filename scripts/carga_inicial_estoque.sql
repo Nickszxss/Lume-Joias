@@ -7,6 +7,7 @@
 DO $$
 DECLARE
   v_prod_id integer;
+  v_prod_ids integer[] := ARRAY[]::integer[];
   v_filial_id integer;
   v_qtd integer;
   v_status text;
@@ -126,6 +127,7 @@ BEGIN
     VALUES (k_prod, v_prod_obj->>'sku', 'Geral', 'unidade', 10, true)
     RETURNING id INTO v_prod_id;
 
+    v_prod_ids := array_append(v_prod_ids, v_prod_id);
     v_prods_criados := v_prods_criados + 1;
 
     -- Inserção de Estoques e Movimentações por Filial
@@ -136,15 +138,15 @@ BEGIN
       v_qtd := (v_prod_obj->>k_filial)::integer;
       v_status := CASE WHEN v_qtd = 0 THEN 'zerado' WHEN v_qtd <= 10 THEN 'baixo' ELSE 'suficiente' END;
 
-      -- Inserção em Estoques (com cast/coerção segura para tipo enum/text se configurado no Postgres)
+      -- Inserção em Estoques (com conversão explícita ::public.status_estoque para compatibilidade enum)
       INSERT INTO public.estoques (produto_id, filial_id, quantidade, status, updated_at)
-      VALUES (v_prod_id, v_filial_id, v_qtd, v_status, NOW());
+      VALUES (v_prod_id, v_filial_id, v_qtd, v_status::public.status_estoque, NOW());
 
       v_estoques_criados := v_estoques_criados + 1;
 
-      -- Inserção no Histórico de Movimentações (com cast/coerção segura e gerente obrigatório)
+      -- Inserção no Histórico de Movimentações (com conversão explícita ::public.tipo_movimentacao)
       INSERT INTO public.movimentacoes (produto_id, filial_id, tipo, quantidade, quantidade_anterior, quantidade_nova, usuario_id, motivo, created_at)
-      VALUES (v_prod_id, v_filial_id, 'entrada', v_qtd, 0, v_qtd, v_gerente_id, 'CARGA_INICIAL_OFFICIAL_1392_V1', NOW());
+      VALUES (v_prod_id, v_filial_id, 'entrada'::public.tipo_movimentacao, v_qtd, 0, v_qtd, v_gerente_id, 'CARGA_INICIAL_OFFICIAL_1392_V1', NOW());
 
       v_movs_criadas := v_movs_criadas + 1;
     END LOOP;
@@ -193,20 +195,34 @@ BEGIN
       v_cnt_comb_invalidas, v_cnt_movs_invalidas;
   END IF;
 
-  -- 6. CONFERÊNCIA DA DISTRIBUIÇÃO POR GERENTE (15 MOVIMENTAÇÕES CADA)
-  SELECT count(*) INTO v_movs_gerente_sul FROM public.movimentacoes WHERE usuario_id = v_mgr_sul AND motivo = 'CARGA_INICIAL_OFFICIAL_1392_V1';
-  SELECT count(*) INTO v_movs_gerente_oeste FROM public.movimentacoes WHERE usuario_id = v_mgr_oeste AND motivo = 'CARGA_INICIAL_OFFICIAL_1392_V1';
-  SELECT count(*) INTO v_movs_gerente_leste FROM public.movimentacoes WHERE usuario_id = v_mgr_leste AND motivo = 'CARGA_INICIAL_OFFICIAL_1392_V1';
+  -- 6. CONFERÊNCIA EXCLUSIVA DA DISTRIBUIÇÃO DAS MOVIMENTAÇÕES CRIADAS NESTA CARGA (15 MOVIMENTAÇÕES POR GERENTE)
+  SELECT count(*) INTO v_movs_gerente_sul
+  FROM public.movimentacoes
+  WHERE usuario_id = v_mgr_sul
+    AND produto_id = ANY(v_prod_ids)
+    AND motivo = 'CARGA_INICIAL_OFFICIAL_1392_V1';
+
+  SELECT count(*) INTO v_movs_gerente_oeste
+  FROM public.movimentacoes
+  WHERE usuario_id = v_mgr_oeste
+    AND produto_id = ANY(v_prod_ids)
+    AND motivo = 'CARGA_INICIAL_OFFICIAL_1392_V1';
+
+  SELECT count(*) INTO v_movs_gerente_leste
+  FROM public.movimentacoes
+  WHERE usuario_id = v_mgr_leste
+    AND produto_id = ANY(v_prod_ids)
+    AND motivo = 'CARGA_INICIAL_OFFICIAL_1392_V1';
 
   IF v_movs_gerente_sul <> 15 OR v_movs_gerente_oeste <> 15 OR v_movs_gerente_leste <> 15 THEN
-    RAISE EXCEPTION 'FALHA NA DISTRIBUIÇÃO DOS GERENTES: Esperado 15 movimentações por gerente (Obtido -> Sul: %, Oeste: %, Leste: %).',
+    RAISE EXCEPTION 'FALHA NA DISTRIBUIÇÃO DOS GERENTES: Esperado 15 movimentações exclusivas por gerente para os produtos criados nesta carga (Obtido -> Sul: %, Oeste: %, Leste: %).',
       v_movs_gerente_sul, v_movs_gerente_oeste, v_movs_gerente_leste;
   END IF;
 
-  -- 7. VALIDAÇÕES FINAIS DE TOTAIS GLOBAIS
+  -- 7. VALIDAÇÕES FINAIS DE TOTAIS GLOBAIS DA CARGA ATUAL
   SELECT COALESCE(SUM(quantidade), 0) INTO v_sum_unidades
   FROM public.estoques
-  WHERE produto_id IN (SELECT id FROM public.produtos WHERE codigo IN ('01','02','03','04','05','06','07','08','09'));
+  WHERE produto_id = ANY(v_prod_ids);
 
   IF v_prods_criados <> 9 OR v_estoques_criados <> 45 OR v_movs_criadas <> 45 OR v_sum_unidades <> 1392 THEN
     RAISE EXCEPTION 'FALHA DE INTEGRIDADE: Esperado 9 produtos, 45 estoques, 45 movimentações e 1392 unidades. (Obtido: % prods, % estoques, % movs, % unidades). Rollback disparado.',

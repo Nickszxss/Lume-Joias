@@ -112,7 +112,10 @@ class TestScriptCargaEstoqueSeguranca(unittest.TestCase):
         self.assertIn("ORDER BY id ASC LIMIT 1", content)
         self.assertIn("::public.status_estoque", content)
         self.assertIn("::public.tipo_movimentacao", content)
-        self.assertIn("produto_id = ANY(v_prod_ids)", content)
+        self.assertIn("v_mgr_sul = v_mgr_oeste", content)
+        self.assertIn("('01','02','03')", content)
+        self.assertIn("('04','05','06')", content)
+        self.assertIn("('07','08','09')", content)
 
 
 if __name__ == "__main__":

@@ -95,6 +95,12 @@ BEGIN
       v_mgr_sul, v_mgr_oeste, v_mgr_leste;
   END IF;
 
+  -- Validação estrita de gerentes distintos entre os grupos
+  IF v_mgr_sul = v_mgr_oeste OR v_mgr_sul = v_mgr_leste OR v_mgr_oeste = v_mgr_leste THEN
+    RAISE EXCEPTION 'ABORTADO: Os gerentes das filiais Sul (ID %), Oeste (ID %) e Leste (ID %) precisam ser usuários distintos.',
+      v_mgr_sul, v_mgr_oeste, v_mgr_leste;
+  END IF;
+
   -- 3. VERIFICAÇÃO DE DADOS PREEXISTENTES (PREVENÇÃO DE DUPLICAÇÕES E CONFLITOS DE UNICIDADE)
   IF EXISTS (SELECT 1 FROM public.produtos WHERE codigo IN ('01','02','03','04','05','06','07','08','09')) THEN
     RAISE EXCEPTION 'ABORTADO: Conflito de dados. Já existem produtos cadastrados no banco com os SKUs oficiais (01 a 09).';
@@ -195,27 +201,30 @@ BEGIN
       v_cnt_comb_invalidas, v_cnt_movs_invalidas;
   END IF;
 
-  -- 6. CONFERÊNCIA EXCLUSIVA DA DISTRIBUIÇÃO DAS MOVIMENTAÇÕES CRIADAS NESTA CARGA (15 MOVIMENTAÇÕES POR GERENTE)
+  -- 6. CONFERÊNCIA EXCLUSIVA DA DISTRIBUIÇÃO DAS MOVIMENTAÇÕES POR GRUPO DE PRODUTOS E GERENTE (15 MOVIMENTAÇÕES CADA)
+  -- Gerente Sul: Produtos 01, 02, 03 (15 movimentações)
   SELECT count(*) INTO v_movs_gerente_sul
   FROM public.movimentacoes
   WHERE usuario_id = v_mgr_sul
-    AND produto_id = ANY(v_prod_ids)
+    AND produto_id IN (SELECT id FROM public.produtos WHERE codigo IN ('01','02','03'))
     AND motivo = 'CARGA_INICIAL_OFFICIAL_1392_V1';
 
+  -- Gerente Oeste: Produtos 04, 05, 06 (15 movimentações)
   SELECT count(*) INTO v_movs_gerente_oeste
   FROM public.movimentacoes
   WHERE usuario_id = v_mgr_oeste
-    AND produto_id = ANY(v_prod_ids)
+    AND produto_id IN (SELECT id FROM public.produtos WHERE codigo IN ('04','05','06'))
     AND motivo = 'CARGA_INICIAL_OFFICIAL_1392_V1';
 
+  -- Gerente Leste: Produtos 07, 08, 09 (15 movimentações)
   SELECT count(*) INTO v_movs_gerente_leste
   FROM public.movimentacoes
   WHERE usuario_id = v_mgr_leste
-    AND produto_id = ANY(v_prod_ids)
+    AND produto_id IN (SELECT id FROM public.produtos WHERE codigo IN ('07','08','09'))
     AND motivo = 'CARGA_INICIAL_OFFICIAL_1392_V1';
 
   IF v_movs_gerente_sul <> 15 OR v_movs_gerente_oeste <> 15 OR v_movs_gerente_leste <> 15 THEN
-    RAISE EXCEPTION 'FALHA NA DISTRIBUIÇÃO DOS GERENTES: Esperado 15 movimentações exclusivas por gerente para os produtos criados nesta carga (Obtido -> Sul: %, Oeste: %, Leste: %).',
+    RAISE EXCEPTION 'FALHA NA DISTRIBUIÇÃO DOS GERENTES: Esperado 15 movimentações exclusivas por gerente para o seu grupo de produtos (Obtido -> Sul [01-03]: %, Oeste [04-06]: %, Leste [07-09]: %).',
       v_movs_gerente_sul, v_movs_gerente_oeste, v_movs_gerente_leste;
   END IF;
 

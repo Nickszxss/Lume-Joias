@@ -95,6 +95,22 @@ class TestScriptCargaEstoqueSeguranca(unittest.TestCase):
         self.assertIn("public.estoques", content)
         self.assertIn("public.movimentacoes", content)
 
+    def test_sql_validacoes_filiais_e_gerentes(self):
+        """Testa se o SQL contém as verificações de nomes exatos de filiais, gerentes e itemização das 45 combinações."""
+        sql_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "scripts", "carga_inicial_estoque.sql"))
+        with open(sql_path, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        self.assertIn("Filial Centro", content)
+        self.assertIn("Filial Norte", content)
+        self.assertIn("Filial Sul", content)
+        self.assertIn("Filial Leste", content)
+        self.assertIn("Filial Oeste", content)
+        self.assertIn("v_cnt_comb_invalidas", content)
+        self.assertIn("v_cnt_movs_invalidas", content)
+        self.assertIn("CARGA_INICIAL_OFFICIAL_1392_V1", content)
+        self.assertIn("ORDER BY id ASC LIMIT 1", content)
+
 
 if __name__ == "__main__":
     unittest.main()

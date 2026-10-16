@@ -76,7 +76,7 @@ END $$;
 
 -- 4. REVOGAÇÃO DE PRIVILÉGIOS RESIDUAIS SOBRE AS 8 TABELAS OPERACIONAIS E SEQUÊNCIAS
 REVOKE ALL ON public.usuarios, public.filiais, public.produtos, public.estoques, public.movimentacoes, public.transferencias, public.pedidos_compra, public.itens_pedido_compra FROM PUBLIC, anon, authenticated;
-REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM PUBLIC, anon;
+REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM PUBLIC, anon, authenticated;
 
 -- Permissões de uso em sequências para geração de IDs automáticos
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO authenticated;

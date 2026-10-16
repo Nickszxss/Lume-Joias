@@ -15,7 +15,8 @@ ALTER TABLE public.itens_pedido_compra ENABLE ROW LEVEL SECURITY;
 
 -- 2. Funções auxiliares para extrair perfil e filial do usuário autenticado no JWT
 -- Endurecidas com SECURITY DEFINER e search_path totalmente limpo (SET search_path = '') com qualificações explícitas.
--- Retornam NULL se a identidade no JWT for anônima, inválida ou não encontrada, impedindo concessão de permissões por padrão.
+-- Retornam NULL se a identidade no JWT for anônima, inválida, não encontrada ou se o usuário estiver INATIVO (u.ativo = true),
+-- garantindo que usuários inativos ou não reconhecidos obtenham ZERO permissões por padrão nas políticas RLS.
 CREATE OR REPLACE FUNCTION public.get_auth_user_cargo()
 RETURNS text
 LANGUAGE sql
@@ -23,7 +24,11 @@ SECURITY DEFINER
 STABLE
 SET search_path = ''
 AS $$
-  SELECT u.cargo FROM public.usuarios u WHERE u.email = (auth.jwt() ->> 'email') LIMIT 1;
+  SELECT u.cargo
+  FROM public.usuarios u
+  WHERE u.email = (auth.jwt() ->> 'email')
+    AND u.ativo = true
+  LIMIT 1;
 $$;
 
 CREATE OR REPLACE FUNCTION public.get_auth_user_filial_id()
@@ -33,7 +38,11 @@ SECURITY DEFINER
 STABLE
 SET search_path = ''
 AS $$
-  SELECT u.filial_id FROM public.usuarios u WHERE u.email = (auth.jwt() ->> 'email') LIMIT 1;
+  SELECT u.filial_id
+  FROM public.usuarios u
+  WHERE u.email = (auth.jwt() ->> 'email')
+    AND u.ativo = true
+  LIMIT 1;
 $$;
 
 -- Restringir execução de funções SECURITY DEFINER apenas para usuários autenticados
@@ -74,17 +83,36 @@ BEGIN
     END LOOP;
 END $$;
 
--- 4. REVOGAÇÃO DE PRIVILÉGIOS RESIDUAIS SOBRE AS 8 TABELAS OPERACIONAIS E SEQUÊNCIAS
+-- 4. REVOGAÇÃO RIGOROSA DE PRIVILÉGIOS RESIDUAIS
 REVOKE ALL ON public.usuarios, public.filiais, public.produtos, public.estoques, public.movimentacoes, public.transferencias, public.pedidos_compra, public.itens_pedido_compra FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM PUBLIC, anon, authenticated;
 
--- Permissões de uso em sequências para geração de IDs automáticos
-GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO authenticated;
+-- Permissões estritas em sequências vinculadas exclusivamente às 8 tabelas do sistema Lume-Joias
+DO $$
+DECLARE
+    seq RECORD;
+BEGIN
+    FOR seq IN
+        SELECT s.relname AS seqname
+        FROM pg_class s
+        JOIN pg_depend d ON d.objid = s.oid
+        JOIN pg_class t ON t.oid = d.refobjid
+        JOIN pg_namespace n ON n.oid = t.relnamespace
+        WHERE s.relkind IN ('S')
+          AND n.nspname = 'public'
+          AND t.relname IN (
+            'usuarios', 'filiais', 'produtos', 'estoques',
+            'movimentacoes', 'transferencias', 'pedidos_compra', 'itens_pedido_compra'
+          )
+    LOOP
+        EXECUTE format('GRANT USAGE, SELECT ON SEQUENCE public.%I TO authenticated', seq.seqname);
+    END LOOP;
+END $$;
 
 -- 5. POLÍTICAS E CONCESSÕES DA TABELA 'usuarios'
 CREATE POLICY "Leitura Usuarios por Perfil" ON public.usuarios
 FOR SELECT USING (
-  email = (auth.jwt() ->> 'email') OR
+  (email = (auth.jwt() ->> 'email') AND ativo = true) OR
   (
     public.get_auth_user_cargo() = 'gerente' AND
     filial_id IS NOT DISTINCT FROM public.get_auth_user_filial_id()
@@ -93,7 +121,7 @@ FOR SELECT USING (
 
 CREATE POLICY "Bloqueio Alteracao Cargo Filial Usuarios" ON public.usuarios
 FOR UPDATE USING (
-  email = (auth.jwt() ->> 'email') OR
+  (email = (auth.jwt() ->> 'email') AND ativo = true) OR
   (
     public.get_auth_user_cargo() = 'gerente' AND
     filial_id IS NOT DISTINCT FROM public.get_auth_user_filial_id()
@@ -103,7 +131,8 @@ FOR UPDATE USING (
     email = (auth.jwt() ->> 'email') AND
     cargo IS NOT DISTINCT FROM public.get_auth_user_cargo() AND
     filial_id IS NOT DISTINCT FROM public.get_auth_user_filial_id() AND
-    tipo IS NOT DISTINCT FROM public.get_auth_user_cargo()
+    tipo IS NOT DISTINCT FROM public.get_auth_user_cargo() AND
+    ativo = true
   ) OR
   (
     public.get_auth_user_cargo() = 'gerente' AND

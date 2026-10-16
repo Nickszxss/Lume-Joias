@@ -91,26 +91,29 @@ END $$;
 REVOKE ALL ON public.usuarios, public.filiais, public.produtos, public.estoques, public.movimentacoes, public.transferencias, public.pedidos_compra, public.itens_pedido_compra FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM PUBLIC, anon, authenticated;
 
--- Permissões de uso em sequências vinculadas por dependência de coluna (deptype 'a'/'i') às 8 tabelas do Lume-Joias
+-- Permissões estritas em sequências vinculadas por dependência de coluna (deptype 'a'/'i') às 8 tabelas do Lume-Joias
 DO $$
 DECLARE
     seq RECORD;
 BEGIN
     FOR seq IN
-        SELECT DISTINCT s.relname AS seqname
+        SELECT DISTINCT
+            sn.nspname AS seqschema,
+            s.relname AS seqname
         FROM pg_class s
+        JOIN pg_namespace sn ON sn.oid = s.relnamespace
         JOIN pg_depend d ON d.objid = s.oid
         JOIN pg_class t ON t.oid = d.refobjid
-        JOIN pg_namespace n ON n.oid = t.relnamespace
+        JOIN pg_namespace tn ON tn.oid = t.relnamespace
         WHERE s.relkind = 'S'
           AND d.deptype IN ('a', 'i')
-          AND n.nspname = 'public'
+          AND tn.nspname = 'public'
           AND t.relname IN (
             'usuarios', 'filiais', 'produtos', 'estoques',
             'movimentacoes', 'transferencias', 'pedidos_compra', 'itens_pedido_compra'
           )
     LOOP
-        EXECUTE format('GRANT USAGE, SELECT ON SEQUENCE public.%I TO authenticated', seq.seqname);
+        EXECUTE format('GRANT USAGE, SELECT ON SEQUENCE %I.%I TO authenticated', seq.seqschema, seq.seqname);
     END LOOP;
 END $$;
 
@@ -177,13 +180,22 @@ FOR SELECT USING (
   filial_id = public.get_auth_user_filial_id()
 );
 
-CREATE POLICY "Escrita Estoques por Perfil" ON public.estoques
-FOR ALL USING (
+CREATE POLICY "Insercao Estoques por Perfil" ON public.estoques
+FOR INSERT WITH CHECK (
   public.get_auth_user_cargo() = 'gerente' OR
   filial_id = public.get_auth_user_filial_id()
 );
 
-GRANT SELECT, INSERT, UPDATE, DELETE ON public.estoques TO authenticated;
+CREATE POLICY "Atualizacao Estoques por Perfil" ON public.estoques
+FOR UPDATE USING (
+  public.get_auth_user_cargo() = 'gerente' OR
+  filial_id = public.get_auth_user_filial_id()
+) WITH CHECK (
+  public.get_auth_user_cargo() = 'gerente' OR
+  filial_id = public.get_auth_user_filial_id()
+);
+
+GRANT SELECT, INSERT, UPDATE ON public.estoques TO authenticated;
 
 -- 8. POLÍTICAS E CONCESSÕES DA TABELA 'movimentacoes'
 CREATE POLICY "Leitura Movimentacoes por Perfil" ON public.movimentacoes

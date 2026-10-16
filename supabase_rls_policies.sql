@@ -13,6 +13,10 @@ ALTER TABLE public.transferencias ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.pedidos_compra ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.itens_pedido_compra ENABLE ROW LEVEL SECURITY;
 
+-- Constraint de Integridade do Banco: Impedir estoques negativos a nível de DDL
+ALTER TABLE public.estoques DROP CONSTRAINT IF EXISTS estoques_quantidade_nonnegative;
+ALTER TABLE public.estoques ADD CONSTRAINT estoques_quantidade_nonnegative CHECK (quantidade >= 0);
+
 -- 2. Funções auxiliares para extrair perfil e filial do usuário autenticado no JWT
 -- Endurecidas com SECURITY DEFINER e search_path totalmente limpo (SET search_path = '') com qualificações explícitas.
 -- Retornam NULL se a identidade no JWT for anônima, inválida, não encontrada ou se o usuário estiver INATIVO (u.ativo = true),
@@ -83,11 +87,11 @@ BEGIN
     END LOOP;
 END $$;
 
--- 4. REVOGAÇÃO RIGOROSA DE PRIVILÉGIOS RESIDUAIS
+-- 4. REVOGAÇÃO RIGOROSA DE PRIVILÉGIOS RESIDUAIS SOBRE TABELAS E SEQUÊNCIAS
 REVOKE ALL ON public.usuarios, public.filiais, public.produtos, public.estoques, public.movimentacoes, public.transferencias, public.pedidos_compra, public.itens_pedido_compra FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM PUBLIC, anon, authenticated;
 
--- Permissões estritas em sequências vinculadas exclusivamente às 8 tabelas do sistema Lume-Joias
+-- Permissões de uso em sequências vinculadas por dependência de coluna (deptype 'a'/'i') às 8 tabelas do Lume-Joias
 DO $$
 DECLARE
     seq RECORD;
@@ -98,7 +102,8 @@ BEGIN
         JOIN pg_depend d ON d.objid = s.oid
         JOIN pg_class t ON t.oid = d.refobjid
         JOIN pg_namespace n ON n.oid = t.relnamespace
-        WHERE s.relkind IN ('S')
+        WHERE s.relkind = 'S'
+          AND d.deptype IN ('a', 'i')
           AND n.nspname = 'public'
           AND t.relname IN (
             'usuarios', 'filiais', 'produtos', 'estoques',
@@ -218,7 +223,10 @@ FOR UPDATE USING (
   destino_id = public.get_auth_user_filial_id()
 );
 
-GRANT SELECT, INSERT, UPDATE ON public.transferencias TO authenticated;
+GRANT SELECT, INSERT ON public.transferencias TO authenticated;
+REVOKE UPDATE ON public.transferencias FROM PUBLIC, anon, authenticated;
+REVOKE UPDATE (id, origem_id, destino_id, produto_id, usuario_id, quantidade, created_at) ON public.transferencias FROM PUBLIC, anon, authenticated;
+GRANT UPDATE (status, observacao, concluida_at) ON public.transferencias TO authenticated;
 
 -- 10. POLÍTICAS E CONCESSÕES DAS TABELAS 'pedidos_compra' E 'itens_pedido_compra'
 CREATE POLICY "Leitura Pedidos Compra por Perfil" ON public.pedidos_compra
@@ -241,7 +249,10 @@ FOR UPDATE USING (
   filial_id = public.get_auth_user_filial_id()
 );
 
-GRANT SELECT, INSERT, UPDATE ON public.pedidos_compra TO authenticated;
+GRANT SELECT, INSERT ON public.pedidos_compra TO authenticated;
+REVOKE UPDATE ON public.pedidos_compra FROM PUBLIC, anon, authenticated;
+REVOKE UPDATE (id, filial_id, usuario_id, created_at) ON public.pedidos_compra FROM PUBLIC, anon, authenticated;
+GRANT UPDATE (status, observacao, recebido_at) ON public.pedidos_compra TO authenticated;
 
 CREATE POLICY "Leitura Itens Pedido Compra por Perfil" ON public.itens_pedido_compra
 FOR SELECT USING (

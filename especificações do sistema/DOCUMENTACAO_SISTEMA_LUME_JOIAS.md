@@ -135,6 +135,7 @@ O banco de dados relacional PostgreSQL no Supabase contém 8 tabelas principais 
 
 ### 6.2 Políticas de Segurança RLS (Row Level Security)
 As políticas RLS estão definidas em `supabase_rls_policies.sql` e garantem a nível de banco:
+- **`public.usuarios` (Correção P0 Ampliada):** Leitura restrita ao próprio perfil do usuário autenticado (`email = auth.jwt() ->> 'email'`) ou a gerentes estritamente para usuários da sua própria filial (`filial_id = public.get_auth_user_filial_id()`), bloqueando consultas cross-filial. Bloqueio total de leitura anônima e revogação no nível de tabela (`REVOKE ALL ON public.usuarios FROM PUBLIC, anon, authenticated;`). Concessão de privilégios de coluna limitados (`GRANT SELECT (id, nome, email, cargo, tipo, filial_id, ativo, created_at) ON public.usuarios TO authenticated;`), omitindo a coluna sensível `senha`. O frontend valida explicitamente o objeto `{ data, error }` das respostas da SDK.
 - Leitura de produtos, estoques e filiais para qualquer usuário autenticado.
 - Alteração de saldo de estoque apenas permitida para usuários autorizados da respectiva filial.
 - Restrição para gerentes na edição/inativação de produtos e conclusão de transferências.

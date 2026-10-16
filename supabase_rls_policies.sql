@@ -53,20 +53,47 @@ DROP POLICY IF EXISTS "Leitura Itens Pedido Compra" ON public.itens_pedido_compr
 DROP POLICY IF EXISTS "Insercao Itens Pedido Compra Apenas Gerente" ON public.itens_pedido_compra;
 
 -- 4. POLÍTICAS DA TABELA 'usuarios'
-CREATE POLICY "Acesso Leitura Usuarios" ON public.usuarios
-FOR SELECT USING (true);
+DROP POLICY IF EXISTS "Acesso Leitura Usuarios" ON public.usuarios;
+DROP POLICY IF EXISTS "Leitura Usuarios por Perfil" ON public.usuarios;
+DROP POLICY IF EXISTS "Bloqueio Alteracao Cargo Filial Usuarios" ON public.usuarios;
 
-CREATE POLICY "Bloqueio Alteracao Cargo Filial Usuarios" ON public.usuarios
-FOR UPDATE USING (
-  public.get_auth_user_cargo() = 'gerente' OR id = (
-    SELECT id FROM public.usuarios WHERE email = auth.jwt() ->> 'email' LIMIT 1
-  )
-) WITH CHECK (
-  public.get_auth_user_cargo() = 'gerente' OR (
-    cargo = public.get_auth_user_cargo() AND
+-- Política de SELECT: Funcionários veem apenas o próprio perfil. Gerentes veem apenas usuários da própria filial.
+CREATE POLICY "Leitura Usuarios por Perfil" ON public.usuarios
+FOR SELECT USING (
+  email = auth.jwt() ->> 'email' OR
+  (
+    public.get_auth_user_cargo() = 'gerente' AND
     filial_id IS NOT DISTINCT FROM public.get_auth_user_filial_id()
   )
 );
+
+-- Política de UPDATE: Impedir que funcionários ou gerentes alterem cargo, tipo, filial_id ou ativo via perfil.
+CREATE POLICY "Bloqueio Alteracao Cargo Filial Usuarios" ON public.usuarios
+FOR UPDATE USING (
+  email = auth.jwt() ->> 'email' OR
+  (
+    public.get_auth_user_cargo() = 'gerente' AND
+    filial_id IS NOT DISTINCT FROM public.get_auth_user_filial_id()
+  )
+) WITH CHECK (
+  (
+    email = auth.jwt() ->> 'email' AND
+    cargo = public.get_auth_user_cargo() AND
+    filial_id IS NOT DISTINCT FROM public.get_auth_user_filial_id()
+  ) OR
+  public.get_auth_user_cargo() = 'gerente'
+);
+
+-- Permissões SQL Rígidas (Column-Level Privileges):
+-- 1. Revogar privilégios do nível de tabela para PUBLIC, anon e authenticated
+REVOKE ALL ON public.usuarios FROM PUBLIC, anon, authenticated;
+REVOKE SELECT ON public.usuarios FROM PUBLIC, anon, authenticated;
+
+-- 2. Conceder SELECT no nível de coluna exclusivamente para authenticated (omitindo a coluna 'senha')
+GRANT SELECT (id, nome, email, cargo, tipo, filial_id, ativo, created_at) ON public.usuarios TO authenticated;
+
+-- 3. Conceder UPDATE apenas nas colunas autorizadas
+GRANT UPDATE (nome) ON public.usuarios TO authenticated;
 
 -- 5. POLÍTICAS DAS TABELAS 'filiais' E 'produtos'
 CREATE POLICY "Leitura Publica Filiais" ON public.filiais FOR SELECT USING (true);

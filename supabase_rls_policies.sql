@@ -93,7 +93,7 @@ DECLARE
     seq RECORD;
 BEGIN
     FOR seq IN
-        SELECT s.relname AS seqname
+        SELECT DISTINCT s.relname AS seqname
         FROM pg_class s
         JOIN pg_depend d ON d.objid = s.oid
         JOIN pg_class t ON t.oid = d.refobjid
@@ -213,6 +213,9 @@ CREATE POLICY "Atualizacao Transferencias por Perfil" ON public.transferencias
 FOR UPDATE USING (
   public.get_auth_user_cargo() = 'gerente' OR
   destino_id = public.get_auth_user_filial_id()
+) WITH CHECK (
+  public.get_auth_user_cargo() = 'gerente' OR
+  destino_id = public.get_auth_user_filial_id()
 );
 
 GRANT SELECT, INSERT, UPDATE ON public.transferencias TO authenticated;
@@ -231,6 +234,9 @@ FOR INSERT WITH CHECK (
 
 CREATE POLICY "Atualizacao Pedidos Compra por Perfil" ON public.pedidos_compra
 FOR UPDATE USING (
+  public.get_auth_user_cargo() = 'gerente' OR
+  filial_id = public.get_auth_user_filial_id()
+) WITH CHECK (
   public.get_auth_user_cargo() = 'gerente' OR
   filial_id = public.get_auth_user_filial_id()
 );

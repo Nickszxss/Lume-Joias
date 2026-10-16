@@ -513,7 +513,13 @@ const api = {
       if (!error && data) {
         const { data: prods } = await client.from('produtos').select('id, nome');
         const { data: fils } = await client.from('filiais').select('id, nome');
-        const { data: usrs } = await client.from('usuarios').select('id, nome');
+        let usrs = null;
+        const { data: usrsData, error: uErr } = await client.from('usuarios').select('id, nome');
+        if (!uErr && usrsData) {
+          usrs = usrsData;
+        } else {
+          usrs = null;
+        }
         let listT = data;
         if (usuario && usuario.tipo === 'funcionario' && usuario.filial_id) {
           listT = listT.filter(t => (t.origem_id == usuario.filial_id || t.origem_filial_id == usuario.filial_id || t.destino_id == usuario.filial_id || t.destino_filial_id == usuario.filial_id));
@@ -707,7 +713,13 @@ const api = {
         const { data: itensData } = await client.from('itens_pedido_compra').select('*');
         const { data: prods } = await client.from('produtos').select('id, nome');
         const { data: fils } = await client.from('filiais').select('id, nome');
-        const { data: usrs } = await client.from('usuarios').select('id, nome');
+        let usrs = null;
+        const { data: usrsData, error: uErr } = await client.from('usuarios').select('id, nome');
+        if (!uErr && usrsData) {
+          usrs = usrsData;
+        } else {
+          usrs = null;
+        }
 
         return pedidosData.map(p => {
           const itensDoPedido = itensData ? itensData.filter(i => String(i.pedido_id) === String(p.id)) : [];
@@ -945,7 +957,13 @@ const api = {
       if (!error && data) {
         const { data: prods } = await client.from('produtos').select('id, nome');
         const { data: fils } = await client.from('filiais').select('id, nome');
-        const { data: usrs } = await client.from('usuarios').select('id, nome');
+        let usrs = null;
+        const { data: usrsData, error: uErr } = await client.from('usuarios').select('id, nome');
+        if (!uErr && usrsData) {
+          usrs = usrsData;
+        } else {
+          usrs = null;
+        }
 
         return data.map(m => {
           const usrEncontrado = usrs?.find(u => String(u.id) === String(m.usuario_id));

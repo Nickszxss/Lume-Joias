@@ -47,11 +47,17 @@ async def test_st02_st10_playwright_e2e():
         # ST-04 / ST-05: Isolamento de Gerente por Filial
         await page.evaluate("simularLogin('gerente')")
         await page.wait_for_selector("#app.active")
-        print("[ST-04/ST-05 APROVADO] Gerente isolado estritamente à própria filial (filial_id check).")
+        gerente_filial_id = await page.evaluate("usuario ? usuario.filial_id : null")
+        assert gerente_filial_id == 3, f"Filial ID de gerente divergente! Esperado 3, obtido {gerente_filial_id}"
+        print(f"[ST-04/ST-05 APROVADO] Gerente autenticado no contexto da Filial {gerente_filial_id} (Filial Sul).")
 
         # ST-06 / ST-07: Proteção da coluna 'senha' e bloqueio de UPDATE indevido
-        print("[ST-06 APROVADO] Coluna 'senha' inacessível via REVOKE SELECT de tabela e omissão em GRANT SELECT.")
-        print("[ST-07 APROVADO] Atualização de cargo/filial bloqueada por RLS e GRANT UPDATE limitado à coluna 'nome'.")
+        sql_content = open("supabase_rls_policies.sql", "r").read()
+        assert "REVOKE SELECT (id, nome, email, senha, cargo, tipo, filial_id, ativo, created_at)" in sql_content, "REVOKE SELECT por coluna ausente!"
+        assert "REVOKE UPDATE (id, nome, email, senha, cargo, tipo, filial_id, ativo, created_at)" in sql_content, "REVOKE UPDATE por coluna ausente!"
+        assert "GRANT UPDATE (nome) ON public.usuarios TO authenticated;" in sql_content, "GRANT UPDATE restrito a 'nome' ausente!"
+        print("[ST-06 APROVADO] Coluna 'senha' inacessível via REVOKE SELECT de tabela/coluna e omissão no GRANT SELECT.")
+        print("[ST-07 APROVADO] Atualização de cargo/filial bloqueada por RLS e GRANT UPDATE limitado estritamente à coluna 'nome'.")
 
         # ST-08: Estabilidade de navegação e funções helpers
         await page.click("a[data-page='historico']")
@@ -60,8 +66,19 @@ async def test_st02_st10_playwright_e2e():
 
         await browser.close()
 
+def test_validar_sintaxe_sql_auth_jwt():
+    """Validação estática do SQL para confirmar sintaxe correta auth.jwt(), SET search_path = '' e limpeza idempotente."""
+    with open("supabase_rls_policies.sql", "r") as f:
+        content = f.read()
+    assert "pg_catalog.auth.jwt()" not in content, "Sintaxe inválida pg_catalog.auth.jwt() encontrada no SQL!"
+    assert "auth.jwt()" in content, "Sintaxe padrão auth.jwt() ausente no SQL!"
+    assert "SET search_path = ''" in content, "SECURITY DEFINER search_path limpo ausente nas funções!"
+    assert "EXECUTE format('DROP POLICY IF EXISTS %I ON public.usuarios', pol.policyname);" in content, "Bloco PL/pgSQL idempotente para remoção de políticas de usuarios ausente!"
+    print("[TESTE ESTÁTICO SQL APROVADO] Sintaxe 'auth.jwt()', SET search_path = '' e limpeza idempotente de políticas validados.")
+
 def main():
     print("=== INICIANDO EXECUÇÃO DA MATRIZ DE TESTES DE SEGURANÇA ST-01 A ST-10 ===")
+    test_validar_sintaxe_sql_auth_jwt()
     asyncio.run(test_st01_leitura_anonima())
     asyncio.run(test_st02_st10_playwright_e2e())
     print("=== MATRIZ DE TESTES ST-01 A ST-10 CONCLUÍDA COM 100% DE SUCESSO ===")

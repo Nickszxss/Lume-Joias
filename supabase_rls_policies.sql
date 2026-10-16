@@ -14,85 +14,115 @@ ALTER TABLE public.pedidos_compra ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.itens_pedido_compra ENABLE ROW LEVEL SECURITY;
 
 -- 2. Funções auxiliares para extrair perfil e filial do usuário autenticado no JWT
+-- Endurecidas com SECURITY DEFINER e search_path totalmente limpo (SET search_path = '') com qualificações explícitas
 CREATE OR REPLACE FUNCTION public.get_auth_user_cargo()
-RETURNS text AS $$
+RETURNS text
+LANGUAGE sql
+SECURITY DEFINER
+STABLE
+SET search_path = ''
+AS $$
   SELECT COALESCE(
-    (SELECT cargo FROM public.usuarios WHERE email = auth.jwt() ->> 'email' LIMIT 1),
+    (SELECT u.cargo FROM public.usuarios u WHERE u.email = (auth.jwt() ->> 'email') LIMIT 1),
     'funcionario'
   );
-$$ LANGUAGE sql SECURITY DEFINER STABLE;
+$$;
 
 CREATE OR REPLACE FUNCTION public.get_auth_user_filial_id()
-RETURNS bigint AS $$
-  SELECT filial_id FROM public.usuarios WHERE email = auth.jwt() ->> 'email' LIMIT 1;
-$$ LANGUAGE sql SECURITY DEFINER STABLE;
+RETURNS bigint
+LANGUAGE sql
+SECURITY DEFINER
+STABLE
+SET search_path = ''
+AS $$
+  SELECT u.filial_id FROM public.usuarios u WHERE u.email = (auth.jwt() ->> 'email') LIMIT 1;
+$$;
+
+-- Restringir execução de funções SECURITY DEFINER apenas para usuários autenticados
+REVOKE EXECUTE ON FUNCTION public.get_auth_user_cargo() FROM PUBLIC, anon;
+REVOKE EXECUTE ON FUNCTION public.get_auth_user_filial_id() FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.get_auth_user_cargo() TO authenticated;
+GRANT EXECUTE ON FUNCTION public.get_auth_user_filial_id() TO authenticated;
 
 -- 3. Remover políticas antigas se existirem
-DROP POLICY IF EXISTS "Acesso Leitura Usuarios" ON public.usuarios;
-DROP POLICY IF EXISTS "Bloqueio Alteracao Cargo Filial Usuarios" ON public.usuarios;
-
-DROP POLICY IF EXISTS "Leitura Publica Filiais" ON public.filiais;
-DROP POLICY IF EXISTS "Leitura Publica Produtos" ON public.produtos;
-DROP POLICY IF EXISTS "Atualizacao Produtos Apenas Gerente" ON public.produtos;
-
-DROP POLICY IF EXISTS "Leitura Estoques por Perfil" ON public.estoques;
-DROP POLICY IF EXISTS "Escrita Estoques por Perfil" ON public.estoques;
-
-DROP POLICY IF EXISTS "Leitura Movimentacoes por Perfil" ON public.movimentacoes;
-DROP POLICY IF EXISTS "Insercao Movimentacoes por Perfil" ON public.movimentacoes;
-
-DROP POLICY IF EXISTS "Leitura Transferencias por Perfil" ON public.transferencias;
-DROP POLICY IF EXISTS "Insercao Transferencias por Perfil" ON public.transferencias;
-DROP POLICY IF EXISTS "Atualizacao Transferencias por Perfil" ON public.transferencias;
-
-DROP POLICY IF EXISTS "Leitura Pedidos Compra por Perfil" ON public.pedidos_compra;
-DROP POLICY IF EXISTS "Insercao Pedidos Compra Apenas Gerente" ON public.pedidos_compra;
-DROP POLICY IF EXISTS "Atualizacao Pedidos Compra por Perfil" ON public.pedidos_compra;
-
-DROP POLICY IF EXISTS "Leitura Itens Pedido Compra" ON public.itens_pedido_compra;
-DROP POLICY IF EXISTS "Insercao Itens Pedido Compra Apenas Gerente" ON public.itens_pedido_compra;
+-- 3. Bloco PL/pgSQL Idempotente para remover TODAS as políticas preexistentes nas 8 tabelas do schema public
+DO $$
+DECLARE
+    pol RECORD;
+BEGIN
+    FOR pol IN
+        SELECT schemaname, tablename, policyname
+        FROM pg_policies
+        WHERE schemaname = 'public'
+          AND tablename IN (
+            'usuarios', 'filiais', 'produtos', 'estoques',
+            'movimentacoes', 'transferencias', 'pedidos_compra', 'itens_pedido_compra'
+          )
+    LOOP
+        EXECUTE format('DROP POLICY IF EXISTS %I ON %I.%I', pol.policyname, pol.schemaname, pol.tablename);
+    END LOOP;
+END $$;
 
 -- 4. POLÍTICAS DA TABELA 'usuarios'
-DROP POLICY IF EXISTS "Acesso Leitura Usuarios" ON public.usuarios;
-DROP POLICY IF EXISTS "Leitura Usuarios por Perfil" ON public.usuarios;
-DROP POLICY IF EXISTS "Bloqueio Alteracao Cargo Filial Usuarios" ON public.usuarios;
+-- Bloco PL/pgSQL Idempotente para remover TODAS as políticas preexistentes de public.usuarios
+DO $$
+DECLARE
+    pol RECORD;
+BEGIN
+    FOR pol IN
+        SELECT policyname
+        FROM pg_policies
+        WHERE schemaname = 'public' AND tablename = 'usuarios'
+    LOOP
+        EXECUTE format('DROP POLICY IF EXISTS %I ON public.usuarios', pol.policyname);
+    END LOOP;
+END $$;
 
 -- Política de SELECT: Funcionários veem apenas o próprio perfil. Gerentes veem apenas usuários da própria filial.
 CREATE POLICY "Leitura Usuarios por Perfil" ON public.usuarios
 FOR SELECT USING (
-  email = auth.jwt() ->> 'email' OR
+  email = (auth.jwt() ->> 'email') OR
   (
     public.get_auth_user_cargo() = 'gerente' AND
     filial_id IS NOT DISTINCT FROM public.get_auth_user_filial_id()
   )
 );
 
--- Política de UPDATE: Impedir que funcionários ou gerentes alterem cargo, tipo, filial_id ou ativo via perfil.
+-- Política de UPDATE: Garantir que funcionários alterem apenas o próprio nome e gerentes apenas nomes de usuários da própria filial
+-- Política de UPDATE: Garantir que funcionários alterem apenas o próprio nome e gerentes apenas nomes de usuários da própria filial sem alterar cargo/filial/ativo
 CREATE POLICY "Bloqueio Alteracao Cargo Filial Usuarios" ON public.usuarios
 FOR UPDATE USING (
-  email = auth.jwt() ->> 'email' OR
+  email = (auth.jwt() ->> 'email') OR
   (
     public.get_auth_user_cargo() = 'gerente' AND
     filial_id IS NOT DISTINCT FROM public.get_auth_user_filial_id()
   )
 ) WITH CHECK (
   (
-    email = auth.jwt() ->> 'email' AND
+    email = (auth.jwt() ->> 'email') AND
     cargo = public.get_auth_user_cargo() AND
-    filial_id IS NOT DISTINCT FROM public.get_auth_user_filial_id()
+    filial_id IS NOT DISTINCT FROM public.get_auth_user_filial_id() AND
+    tipo = public.get_auth_user_cargo()
   ) OR
-  public.get_auth_user_cargo() = 'gerente'
+  (
+    public.get_auth_user_cargo() = 'gerente' AND
+    filial_id IS NOT DISTINCT FROM public.get_auth_user_filial_id() AND
+    cargo = 'funcionario'
+  )
 );
 
 -- Permissões SQL Rígidas (Column-Level Privileges):
--- 1. Revogar privilégios do nível de tabela para PUBLIC, anon e authenticated
+-- 1. Revogar privilégios do nível de tabela e de TODAS as colunas para PUBLIC, anon e authenticated
 REVOKE ALL ON public.usuarios FROM PUBLIC, anon, authenticated;
 REVOKE SELECT ON public.usuarios FROM PUBLIC, anon, authenticated;
+REVOKE UPDATE ON public.usuarios FROM PUBLIC, anon, authenticated;
+REVOKE SELECT (id, nome, email, senha, cargo, tipo, filial_id, ativo, created_at) ON public.usuarios FROM PUBLIC, anon, authenticated;
+REVOKE UPDATE (id, nome, email, senha, cargo, tipo, filial_id, ativo, created_at) ON public.usuarios FROM PUBLIC, anon, authenticated;
 
--- 2. Conceder SELECT no nível de coluna exclusivamente para authenticated (omitindo a coluna 'senha')
+-- 2. Conceder SELECT no nível de coluna exclusivamente para authenticated (omitindo explicitamente a coluna 'senha')
 GRANT SELECT (id, nome, email, cargo, tipo, filial_id, ativo, created_at) ON public.usuarios TO authenticated;
 
--- 3. Conceder UPDATE apenas nas colunas autorizadas
+-- 3. Conceder UPDATE exclusivamente na coluna 'nome' autorizada
 GRANT UPDATE (nome) ON public.usuarios TO authenticated;
 
 -- 5. POLÍTICAS DAS TABELAS 'filiais' E 'produtos'
@@ -168,8 +198,15 @@ FOR UPDATE USING (
   filial_id = public.get_auth_user_filial_id()
 );
 
-CREATE POLICY "Leitura Itens Pedido Compra" ON public.itens_pedido_compra
-FOR SELECT USING (true);
+CREATE POLICY "Leitura Itens Pedido Compra por Perfil" ON public.itens_pedido_compra
+FOR SELECT USING (
+  public.get_auth_user_cargo() = 'gerente' OR
+  EXISTS (
+    SELECT 1 FROM public.pedidos_compra p
+    WHERE p.id = itens_pedido_compra.pedido_id
+      AND p.filial_id = public.get_auth_user_filial_id()
+  )
+);
 
 CREATE POLICY "Insercao Itens Pedido Compra Apenas Gerente" ON public.itens_pedido_compra
 FOR INSERT WITH CHECK (

@@ -1,5 +1,5 @@
 -- =====================================================================
--- SCRIPT DE POLÍTICAS RLS (ROW LEVEL SECURITY) — LUME JOIAS
+-- SCRIPT DE POLÍTICAS RLS (ROW LEVEL SECURITY) E PRIVILÉGIOS — LUME JOIAS
 -- Arquitetura: Supabase PostgreSQL (GitHub Pages + Supabase Client)
 -- =====================================================================
 
@@ -14,7 +14,8 @@ ALTER TABLE public.pedidos_compra ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.itens_pedido_compra ENABLE ROW LEVEL SECURITY;
 
 -- 2. Funções auxiliares para extrair perfil e filial do usuário autenticado no JWT
--- Endurecidas com SECURITY DEFINER e search_path totalmente limpo (SET search_path = '') com qualificações explícitas
+-- Endurecidas com SECURITY DEFINER e search_path totalmente limpo (SET search_path = '') com qualificações explícitas.
+-- Retornam NULL se a identidade no JWT for anônima, inválida ou não encontrada, impedindo concessão de permissões por padrão.
 CREATE OR REPLACE FUNCTION public.get_auth_user_cargo()
 RETURNS text
 LANGUAGE sql
@@ -22,10 +23,7 @@ SECURITY DEFINER
 STABLE
 SET search_path = ''
 AS $$
-  SELECT COALESCE(
-    (SELECT u.cargo FROM public.usuarios u WHERE u.email = (auth.jwt() ->> 'email') LIMIT 1),
-    'funcionario'
-  );
+  SELECT u.cargo FROM public.usuarios u WHERE u.email = (auth.jwt() ->> 'email') LIMIT 1;
 $$;
 
 CREATE OR REPLACE FUNCTION public.get_auth_user_filial_id()
@@ -38,13 +36,6 @@ AS $$
   SELECT u.filial_id FROM public.usuarios u WHERE u.email = (auth.jwt() ->> 'email') LIMIT 1;
 $$;
 
--- Restringir execução de funções SECURITY DEFINER apenas para usuários autenticados
-REVOKE EXECUTE ON FUNCTION public.get_auth_user_cargo() FROM PUBLIC, anon;
-REVOKE EXECUTE ON FUNCTION public.get_auth_user_filial_id() FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.get_auth_user_cargo() TO authenticated;
-GRANT EXECUTE ON FUNCTION public.get_auth_user_filial_id() TO authenticated;
-
--- 3. Remover políticas antigas se existirem
 -- 3. Bloco PL/pgSQL Idempotente para remover TODAS as políticas preexistentes nas 8 tabelas do schema public
 DO $$
 DECLARE
@@ -63,7 +54,6 @@ BEGIN
     END LOOP;
 END $$;
 
--- 4. POLÍTICAS DA TABELA 'usuarios'
 -- Bloco PL/pgSQL Idempotente para remover TODAS as políticas preexistentes de public.usuarios
 DO $$
 DECLARE
@@ -78,7 +68,18 @@ BEGIN
     END LOOP;
 END $$;
 
--- Política de SELECT: Funcionários veem apenas o próprio perfil. Gerentes veem apenas usuários da própria filial.
+-- 4. REVOGAÇÃO RIGOROSA DE PRIVILÉGIOS RESIDUAIS (TABELAS, SEQUÊNCIAS E FUNÇÕES)
+REVOKE ALL ON ALL TABLES IN SCHEMA public FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM PUBLIC, anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.get_auth_user_cargo() FROM PUBLIC, anon;
+REVOKE EXECUTE ON FUNCTION public.get_auth_user_filial_id() FROM PUBLIC, anon;
+
+-- Permissões de uso em sequências para geração de IDs automáticos
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO authenticated;
+GRANT EXECUTE ON FUNCTION public.get_auth_user_cargo() TO authenticated;
+GRANT EXECUTE ON FUNCTION public.get_auth_user_filial_id() TO authenticated;
+
+-- 5. POLÍTICAS E CONCESSÕES DA TABELA 'usuarios'
 CREATE POLICY "Leitura Usuarios por Perfil" ON public.usuarios
 FOR SELECT USING (
   email = (auth.jwt() ->> 'email') OR
@@ -88,8 +89,6 @@ FOR SELECT USING (
   )
 );
 
--- Política de UPDATE: Garantir que funcionários alterem apenas o próprio nome e gerentes apenas nomes de usuários da própria filial
--- Política de UPDATE: Garantir que funcionários alterem apenas o próprio nome e gerentes apenas nomes de usuários da própria filial sem alterar cargo/tipo/filial/ativo
 CREATE POLICY "Bloqueio Alteracao Cargo Filial Usuarios" ON public.usuarios
 FOR UPDATE USING (
   email = (auth.jwt() ->> 'email') OR
@@ -100,9 +99,9 @@ FOR UPDATE USING (
 ) WITH CHECK (
   (
     email = (auth.jwt() ->> 'email') AND
-    cargo = public.get_auth_user_cargo() AND
+    cargo IS NOT DISTINCT FROM public.get_auth_user_cargo() AND
     filial_id IS NOT DISTINCT FROM public.get_auth_user_filial_id() AND
-    tipo = public.get_auth_user_cargo()
+    tipo IS NOT DISTINCT FROM public.get_auth_user_cargo()
   ) OR
   (
     public.get_auth_user_cargo() = 'gerente' AND
@@ -112,30 +111,30 @@ FOR UPDATE USING (
   )
 );
 
--- Permissões SQL Rígidas (Column-Level Privileges):
--- 1. Revogar privilégios do nível de tabela e de TODAS as colunas para PUBLIC, anon e authenticated
-REVOKE ALL ON public.usuarios FROM PUBLIC, anon, authenticated;
-REVOKE SELECT ON public.usuarios FROM PUBLIC, anon, authenticated;
-REVOKE UPDATE ON public.usuarios FROM PUBLIC, anon, authenticated;
+-- Permissões por Coluna em 'usuarios' (Omitindo explicitamente a coluna 'senha')
 REVOKE SELECT (id, nome, email, senha, cargo, tipo, filial_id, ativo, created_at) ON public.usuarios FROM PUBLIC, anon, authenticated;
 REVOKE UPDATE (id, nome, email, senha, cargo, tipo, filial_id, ativo, created_at) ON public.usuarios FROM PUBLIC, anon, authenticated;
-
--- 2. Conceder SELECT no nível de coluna exclusivamente para authenticated (omitindo explicitamente a coluna 'senha')
 GRANT SELECT (id, nome, email, cargo, tipo, filial_id, ativo, created_at) ON public.usuarios TO authenticated;
-
--- 3. Conceder UPDATE exclusivamente na coluna 'nome' autorizada
 GRANT UPDATE (nome) ON public.usuarios TO authenticated;
 
--- 5. POLÍTICAS DAS TABELAS 'filiais' E 'produtos'
+-- 6. POLÍTICAS E CONCESSÕES DAS TABELAS 'filiais' E 'produtos'
 CREATE POLICY "Leitura Publica Filiais" ON public.filiais FOR SELECT USING (true);
+GRANT SELECT ON public.filiais TO anon, authenticated;
+
 CREATE POLICY "Leitura Publica Produtos" ON public.produtos FOR SELECT USING (true);
+
+CREATE POLICY "Insercao Produtos por Autenticado" ON public.produtos
+FOR INSERT WITH CHECK (auth.role() = 'authenticated');
 
 CREATE POLICY "Atualizacao Produtos Apenas Gerente" ON public.produtos
 FOR UPDATE USING (
   public.get_auth_user_cargo() = 'gerente'
 );
 
--- 6. POLÍTICAS DA TABELA 'estoques'
+GRANT SELECT ON public.produtos TO anon, authenticated;
+GRANT INSERT, UPDATE ON public.produtos TO authenticated;
+
+-- 7. POLÍTICAS E CONCESSÕES DA TABELA 'estoques'
 CREATE POLICY "Leitura Estoques por Perfil" ON public.estoques
 FOR SELECT USING (
   public.get_auth_user_cargo() = 'gerente' OR
@@ -148,7 +147,9 @@ FOR ALL USING (
   filial_id = public.get_auth_user_filial_id()
 );
 
--- 7. POLÍTICAS DA TABELA 'movimentacoes'
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.estoques TO authenticated;
+
+-- 8. POLÍTICAS E CONCESSÕES DA TABELA 'movimentacoes'
 CREATE POLICY "Leitura Movimentacoes por Perfil" ON public.movimentacoes
 FOR SELECT USING (
   public.get_auth_user_cargo() = 'gerente' OR
@@ -161,7 +162,9 @@ FOR INSERT WITH CHECK (
   filial_id = public.get_auth_user_filial_id()
 );
 
--- 8. POLÍTICAS DA TABELA 'transferencias'
+GRANT SELECT, INSERT ON public.movimentacoes TO authenticated;
+
+-- 9. POLÍTICAS E CONCESSÕES DA TABELA 'transferencias'
 CREATE POLICY "Leitura Transferencias por Perfil" ON public.transferencias
 FOR SELECT USING (
   public.get_auth_user_cargo() = 'gerente' OR
@@ -181,7 +184,9 @@ FOR UPDATE USING (
   destino_id = public.get_auth_user_filial_id()
 );
 
--- 9. POLÍTICAS DAS TABELAS 'pedidos_compra' E 'itens_pedido_compra'
+GRANT SELECT, INSERT, UPDATE ON public.transferencias TO authenticated;
+
+-- 10. POLÍTICAS E CONCESSÕES DAS TABELAS 'pedidos_compra' E 'itens_pedido_compra'
 CREATE POLICY "Leitura Pedidos Compra por Perfil" ON public.pedidos_compra
 FOR SELECT USING (
   public.get_auth_user_cargo() = 'gerente' OR
@@ -193,33 +198,13 @@ FOR INSERT WITH CHECK (
   public.get_auth_user_cargo() = 'gerente'
 );
 
--- 10. PRIVILÉGIOS SQL EXPLÍCITOS PARA AS DEMAIS TABELAS OPERACIONAIS
--- Revogar acesso público/anônimo a dados sensíveis operacionais
-REVOKE ALL ON public.filiais FROM PUBLIC, anon;
-REVOKE ALL ON public.produtos FROM PUBLIC, anon;
-REVOKE ALL ON public.estoques FROM PUBLIC, anon;
-REVOKE ALL ON public.movimentacoes FROM PUBLIC, anon;
-REVOKE ALL ON public.transferencias FROM PUBLIC, anon;
-REVOKE ALL ON public.pedidos_compra FROM PUBLIC, anon;
-REVOKE ALL ON public.itens_pedido_compra FROM PUBLIC, anon;
-
--- Permissões públicas/anônimas estritamente necessárias
-GRANT SELECT ON public.filiais TO anon, authenticated;
-GRANT SELECT ON public.produtos TO anon, authenticated;
-
--- Permissões para usuários autenticados (protegidas por RLS)
-GRANT INSERT, UPDATE, DELETE ON public.produtos TO authenticated;
-GRANT SELECT, INSERT, UPDATE, DELETE ON public.estoques TO authenticated;
-GRANT SELECT, INSERT ON public.movimentacoes TO authenticated;
-GRANT SELECT, INSERT, UPDATE ON public.transferencias TO authenticated;
-GRANT SELECT, INSERT, UPDATE ON public.pedidos_compra TO authenticated;
-GRANT SELECT, INSERT ON public.itens_pedido_compra TO authenticated;
-
 CREATE POLICY "Atualizacao Pedidos Compra por Perfil" ON public.pedidos_compra
 FOR UPDATE USING (
   public.get_auth_user_cargo() = 'gerente' OR
   filial_id = public.get_auth_user_filial_id()
 );
+
+GRANT SELECT, INSERT, UPDATE ON public.pedidos_compra TO authenticated;
 
 CREATE POLICY "Leitura Itens Pedido Compra por Perfil" ON public.itens_pedido_compra
 FOR SELECT USING (
@@ -235,3 +220,5 @@ CREATE POLICY "Insercao Itens Pedido Compra Apenas Gerente" ON public.itens_pedi
 FOR INSERT WITH CHECK (
   public.get_auth_user_cargo() = 'gerente'
 );
+
+GRANT SELECT, INSERT ON public.itens_pedido_compra TO authenticated;

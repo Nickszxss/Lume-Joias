@@ -1309,7 +1309,7 @@ async function fazerLogin(){
 function simularLogin(tipo){
   const nome = (tipo === 'gerente' ? 'Gerente' : 'Funcionário');
   aplicarLogin(tipo === 'gerente'
-    ? {nome, tipo:'gerente', cargo:'gerente', filial_id:null}
+    ? {nome, tipo:'gerente', cargo:'gerente', filial_id:3}
     : {nome, tipo:'funcionario', cargo:'funcionario', filial_id:1});
 }
 

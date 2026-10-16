@@ -89,7 +89,7 @@ FOR SELECT USING (
 );
 
 -- Política de UPDATE: Garantir que funcionários alterem apenas o próprio nome e gerentes apenas nomes de usuários da própria filial
--- Política de UPDATE: Garantir que funcionários alterem apenas o próprio nome e gerentes apenas nomes de usuários da própria filial sem alterar cargo/filial/ativo
+-- Política de UPDATE: Garantir que funcionários alterem apenas o próprio nome e gerentes apenas nomes de usuários da própria filial sem alterar cargo/tipo/filial/ativo
 CREATE POLICY "Bloqueio Alteracao Cargo Filial Usuarios" ON public.usuarios
 FOR UPDATE USING (
   email = (auth.jwt() ->> 'email') OR
@@ -107,7 +107,8 @@ FOR UPDATE USING (
   (
     public.get_auth_user_cargo() = 'gerente' AND
     filial_id IS NOT DISTINCT FROM public.get_auth_user_filial_id() AND
-    cargo = 'funcionario'
+    cargo = 'funcionario' AND
+    tipo = 'funcionario'
   )
 );
 
@@ -191,6 +192,28 @@ CREATE POLICY "Insercao Pedidos Compra Apenas Gerente" ON public.pedidos_compra
 FOR INSERT WITH CHECK (
   public.get_auth_user_cargo() = 'gerente'
 );
+
+-- 10. PRIVILÉGIOS SQL EXPLÍCITOS PARA AS DEMAIS TABELAS OPERACIONAIS
+-- Revogar acesso público/anônimo a dados sensíveis operacionais
+REVOKE ALL ON public.filiais FROM PUBLIC, anon;
+REVOKE ALL ON public.produtos FROM PUBLIC, anon;
+REVOKE ALL ON public.estoques FROM PUBLIC, anon;
+REVOKE ALL ON public.movimentacoes FROM PUBLIC, anon;
+REVOKE ALL ON public.transferencias FROM PUBLIC, anon;
+REVOKE ALL ON public.pedidos_compra FROM PUBLIC, anon;
+REVOKE ALL ON public.itens_pedido_compra FROM PUBLIC, anon;
+
+-- Permissões públicas/anônimas estritamente necessárias
+GRANT SELECT ON public.filiais TO anon, authenticated;
+GRANT SELECT ON public.produtos TO anon, authenticated;
+
+-- Permissões para usuários autenticados (protegidas por RLS)
+GRANT INSERT, UPDATE, DELETE ON public.produtos TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.estoques TO authenticated;
+GRANT SELECT, INSERT ON public.movimentacoes TO authenticated;
+GRANT SELECT, INSERT, UPDATE ON public.transferencias TO authenticated;
+GRANT SELECT, INSERT, UPDATE ON public.pedidos_compra TO authenticated;
+GRANT SELECT, INSERT ON public.itens_pedido_compra TO authenticated;
 
 CREATE POLICY "Atualizacao Pedidos Compra por Perfil" ON public.pedidos_compra
 FOR UPDATE USING (

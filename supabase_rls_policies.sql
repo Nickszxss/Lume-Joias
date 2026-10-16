@@ -3,7 +3,7 @@
 -- Arquitetura: Supabase PostgreSQL (GitHub Pages + Supabase Client)
 -- =====================================================================
 
--- 1. Habilitar RLS em todas as tabelas públicas
+-- 1. Habilitar RLS nas 8 tabelas públicas do sistema
 ALTER TABLE public.usuarios ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.filiais ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.produtos ENABLE ROW LEVEL SECURITY;
@@ -36,7 +36,13 @@ AS $$
   SELECT u.filial_id FROM public.usuarios u WHERE u.email = (auth.jwt() ->> 'email') LIMIT 1;
 $$;
 
--- 3. Bloco PL/pgSQL Idempotente para remover TODAS as políticas preexistentes nas 8 tabelas do schema public
+-- Restringir execução de funções SECURITY DEFINER apenas para usuários autenticados
+REVOKE EXECUTE ON FUNCTION public.get_auth_user_cargo() FROM PUBLIC, anon;
+REVOKE EXECUTE ON FUNCTION public.get_auth_user_filial_id() FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.get_auth_user_cargo() TO authenticated;
+GRANT EXECUTE ON FUNCTION public.get_auth_user_filial_id() TO authenticated;
+
+-- 3. Bloco PL/pgSQL Idempotente para remover TODAS as políticas preexistentes nas 8 tabelas
 DO $$
 DECLARE
     pol RECORD;
@@ -68,16 +74,12 @@ BEGIN
     END LOOP;
 END $$;
 
--- 4. REVOGAÇÃO RIGOROSA DE PRIVILÉGIOS RESIDUAIS (TABELAS, SEQUÊNCIAS E FUNÇÕES)
-REVOKE ALL ON ALL TABLES IN SCHEMA public FROM PUBLIC, anon, authenticated;
-REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM PUBLIC, anon, authenticated;
-REVOKE EXECUTE ON FUNCTION public.get_auth_user_cargo() FROM PUBLIC, anon;
-REVOKE EXECUTE ON FUNCTION public.get_auth_user_filial_id() FROM PUBLIC, anon;
+-- 4. REVOGAÇÃO DE PRIVILÉGIOS RESIDUAIS SOBRE AS 8 TABELAS OPERACIONAIS E SEQUÊNCIAS
+REVOKE ALL ON public.usuarios, public.filiais, public.produtos, public.estoques, public.movimentacoes, public.transferencias, public.pedidos_compra, public.itens_pedido_compra FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM PUBLIC, anon;
 
 -- Permissões de uso em sequências para geração de IDs automáticos
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO authenticated;
-GRANT EXECUTE ON FUNCTION public.get_auth_user_cargo() TO authenticated;
-GRANT EXECUTE ON FUNCTION public.get_auth_user_filial_id() TO authenticated;
 
 -- 5. POLÍTICAS E CONCESSÕES DA TABELA 'usuarios'
 CREATE POLICY "Leitura Usuarios por Perfil" ON public.usuarios

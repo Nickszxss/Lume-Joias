@@ -13,14 +13,14 @@ ALTER TABLE public.transferencias ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.pedidos_compra ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.itens_pedido_compra ENABLE ROW LEVEL SECURITY;
 
--- Constraint de Integridade do Banco: Validação preventiva antes de aplicar CHECK (quantidade >= 0)
+-- Constraint de Integridade do Banco: Validação preventiva estrita com interrupção por RAISE EXCEPTION se houver saldos negativos
 DO $$
 DECLARE
     v_negatives_count integer;
 BEGIN
     SELECT count(*) INTO v_negatives_count FROM public.estoques WHERE quantidade < 0;
     IF v_negatives_count > 0 THEN
-        RAISE NOTICE 'AVISO DE SEGURANÇA: Existem % registros com quantidade negativa em public.estoques. Corrija os saldos antes de aplicar a constraint CHECK (quantidade >= 0).', v_negatives_count;
+        RAISE EXCEPTION 'ERRO DE SEGURANÇA: Existem % registros com quantidade negativa na tabela public.estoques. A constraint CHECK (quantidade >= 0) nao pode ser aplicada. Regularize os saldos antes de reexecutar o script.', v_negatives_count;
     ELSE
         ALTER TABLE public.estoques DROP CONSTRAINT IF EXISTS estoques_quantidade_nonnegative;
         ALTER TABLE public.estoques ADD CONSTRAINT estoques_quantidade_nonnegative CHECK (quantidade >= 0);
@@ -101,7 +101,7 @@ END $$;
 REVOKE ALL ON public.usuarios, public.filiais, public.produtos, public.estoques, public.movimentacoes, public.transferencias, public.pedidos_compra, public.itens_pedido_compra FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM PUBLIC, anon, authenticated;
 
--- Permissões estritas em sequências vinculadas por dependência de coluna (deptype 'a'/'i') às 8 tabelas do Lume-Joias
+-- Permissões estritas em sequências vinculadas explicitamente a colunas (refobjsubid > 0 e deptype 'a'/'i') das 8 tabelas do Lume-Joias
 DO $$
 DECLARE
     seq RECORD;
@@ -117,6 +117,7 @@ BEGIN
         JOIN pg_namespace tn ON tn.oid = t.relnamespace
         WHERE s.relkind = 'S'
           AND d.deptype IN ('a', 'i')
+          AND d.refobjsubid > 0
           AND tn.nspname = 'public'
           AND t.relname IN (
             'usuarios', 'filiais', 'produtos', 'estoques',

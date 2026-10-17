@@ -241,8 +241,8 @@ FOR UPDATE USING (
   public.get_auth_user_cargo() = 'gerente' OR
   destino_id = public.get_auth_user_filial_id()
 ) WITH CHECK (
-  public.get_auth_user_cargo() = 'gerente' OR
-  destino_id = public.get_auth_user_filial_id()
+  (public.get_auth_user_cargo() = 'gerente' OR destino_id = public.get_auth_user_filial_id()) AND
+  status IN ('pendente', 'concluida')
 );
 
 GRANT SELECT, INSERT ON public.transferencias TO authenticated;
@@ -267,8 +267,8 @@ FOR UPDATE USING (
   public.get_auth_user_cargo() = 'gerente' OR
   filial_id = public.get_auth_user_filial_id()
 ) WITH CHECK (
-  public.get_auth_user_cargo() = 'gerente' OR
-  filial_id = public.get_auth_user_filial_id()
+  (public.get_auth_user_cargo() = 'gerente' OR filial_id = public.get_auth_user_filial_id()) AND
+  status IN ('aberto', 'recebido')
 );
 
 GRANT SELECT, INSERT ON public.pedidos_compra TO authenticated;

@@ -104,16 +104,6 @@
         Pedidos de Compra
       </a>
 
-      <a data-page="alertas">
-        <span class="icon">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-            <path d="M12 3 2 20h20L12 3Z"/>
-            <path d="M12 10v4"/>
-            <circle cx="12" cy="17" r="0.6" fill="currentColor"/>
-          </svg>
-        </span>
-        Alertas
-      </a>
 
       <a data-page="historico">
         <span class="icon">
@@ -184,10 +174,6 @@
         </div>
       </div>
 
-      <div class="card" style="margin-top:20px;">
-        <h3 class="section">Itens com Estoque Baixo ou Zerado</h3>
-        <div id="dash-alertas"></div>
-      </div>
     </section>
 
     <!-- PRODUTOS -->
@@ -208,8 +194,7 @@
 
         <select id="filtro-status" onchange="renderProdutos()">
           <option value="">Todos os status</option>
-          <option value="suficiente">Suficiente</option>
-          <option value="baixo">Baixo</option>
+          <option value="suficiente">Disponível</option>
           <option value="zerado">Zerado</option>
         </select>
       </div>
@@ -221,7 +206,6 @@
               <th>SKU</th>
               <th>Produto</th>
               <th>Categoria</th>
-              <th>Qtd. Mínima</th>
               <th>Filial</th>
               <th>Qtd. Atual</th>
               <th>Status</th>
@@ -244,6 +228,12 @@
         <div class="tab-filial" id="estoque-filiais"></div>
       </div>
 
+      <div class="toolbar">
+        <select id="filtro-estoque-produto" onchange="renderEstoque()">
+          <option value="">Todos os produtos</option>
+        </select>
+      </div>
+
       <div class="card">
         <table>
           <thead>
@@ -252,7 +242,6 @@
               <th>Produto</th>
               <th>Filial</th>
               <th>Quantidade</th>
-              <th>Mínimo</th>
               <th>Status</th>
               <th>Ajustar</th>
             </tr>
@@ -327,34 +316,6 @@
       </div>
     </section>
 
-    <!-- ALERTAS -->
-    <section class="page" id="page-alertas">
-      <div class="page-header">
-        <div>
-          <h2>Alertas de Estoque</h2>
-          <p class="desc">Produtos com quantidade abaixo do mínimo ou zerados</p>
-        </div>
-      </div>
-
-      <div class="grid-kpi" id="alertas-kpis"></div>
-
-      <div class="card">
-        <table>
-          <thead>
-            <tr>
-              <th>SKU</th>
-              <th>Produto</th>
-              <th>Filial</th>
-              <th>Qtd. Atual</th>
-              <th>Qtd. Mínima</th>
-              <th>Status</th>
-              <th>Ação</th>
-            </tr>
-          </thead>
-          <tbody id="tbody-alertas"></tbody>
-        </table>
-      </div>
-    </section>
 
     <!-- HISTÓRICO -->
     <section class="page" id="page-historico">
@@ -415,8 +376,8 @@
     </div>
 
     <div class="field">
-      <label>Categoria</label>
-      <input id="ep-cat" placeholder="Ex: Anéis">
+      <label>Categoria (Automática)</label>
+      <input id="ep-cat" placeholder="Categoria automática" readonly style="background-color: var(--bg-body, #f4f4f5); cursor: not-allowed;">
     </div>
 
     <div class="field">
@@ -424,10 +385,6 @@
       <input id="ep-sku" placeholder="001">
     </div>
 
-    <div class="field">
-      <label>Quantidade mínima</label>
-      <input id="ep-min" type="number" min="0" value="10">
-    </div>
 
     <div class="actions">
       <button class="btn btn-secondary" onclick="fecharModal()">Cancelar</button>
@@ -455,8 +412,8 @@
     </div>
 
     <div class="field">
-      <label>Categoria</label>
-      <input id="p-cat" placeholder="Ex: Anéis">
+      <label>Categoria (Preenchimento Automático)</label>
+      <input id="p-cat" placeholder="Categoria automática" readonly style="background-color: var(--bg-body, #f4f4f5); cursor: not-allowed;">
     </div>
 
     <div class="field">
@@ -469,14 +426,6 @@
       <select id="p-filial"></select>
     </div>
 
-    <div class="field">
-      <label>Estoque Mínimo *</label>
-      <select id="p-min">
-        <option value="10">10 unidades</option>
-        <option value="30">30 unidades</option>
-        <option value="50">50 unidades</option>
-      </select>
-    </div>
 
     <div class="actions">
       <button class="btn btn-secondary" onclick="fecharModal()">Cancelar</button>

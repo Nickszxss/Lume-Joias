@@ -27,19 +27,15 @@ async def test_cadastro_produtos_sku():
 
         placeholder = await page.get_attribute("#p-cat", "placeholder")
         print(f"[TESTE PLACEHOLDER]: Encontrado -> {placeholder}")
-        assert "Ex: Anéis" in placeholder, f"Placeholder esperado 'Ex: Anéis', mas foi '{placeholder}'"
+        assert "automática" in placeholder.lower(), f"Placeholder esperado 'Categoria automática', mas foi '{placeholder}'"
 
-        # 4. Testar Mapeamento Automático de SKU por Tipo de Joia
+        # 4. Testar Mapeamento Automático de SKU e Categoria por Tipo de Joia
         await page.select_option("#p-nome", "Brinco de ouro")
         sku_val = await page.input_value("#p-sku")
-        print(f"[TESTE SKU AUTO]: Selecionado 'Brinco de ouro' -> SKU: {sku_val}")
+        cat_val = await page.input_value("#p-cat")
+        print(f"[TESTE SKU E CAT AUTO]: Selecionado 'Brinco de ouro' -> SKU: {sku_val}, Categoria: {cat_val}")
         assert sku_val == "06", f"SKU esperado '06', mas foi '{sku_val}'"
-
-        # 5. Testar Seleção de Estoque Mínimo
-        await page.select_option("#p-min", "30")
-        min_val = await page.input_value("#p-min")
-        print(f"[TESTE ESTOQUE MÍNIMO]: Selecionado -> {min_val}")
-        assert min_val == "30", f"Estoque mínimo esperado '30', mas foi '{min_val}'"
+        assert cat_val == "BRINCO", f"Categoria esperada 'BRINCO', mas foi '{cat_val}'"
 
         # Click Cancel inside active #modal-produto modal
         await page.click("#modal-produto button[onclick='fecharModal()']")

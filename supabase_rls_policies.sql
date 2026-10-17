@@ -184,6 +184,47 @@ FOR UPDATE USING (
 GRANT SELECT ON public.produtos TO anon, authenticated;
 GRANT INSERT, UPDATE ON public.produtos TO authenticated;
 
+-- Tabela e Políticas para Inativação/Retirada de Uso Local de Produtos por Filial
+CREATE TABLE IF NOT EXISTS public.produtos_filiais_inativos (
+    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    produto_id bigint NOT NULL REFERENCES public.produtos(id) ON DELETE CASCADE,
+    filial_id bigint NOT NULL REFERENCES public.filiais(id) ON DELETE CASCADE,
+    desativado_por bigint REFERENCES public.usuarios(id),
+    created_at timestamptz DEFAULT now(),
+    CONSTRAINT unique_produto_filial_inativo UNIQUE (produto_id, filial_id)
+);
+
+ALTER TABLE public.produtos_filiais_inativos ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Leitura Inativos por Autenticado" ON public.produtos_filiais_inativos
+FOR SELECT USING (auth.role() = 'authenticated');
+
+CREATE POLICY "Insercao Inativos Apenas Gerente Filial" ON public.produtos_filiais_inativos
+FOR INSERT WITH CHECK (
+  public.get_auth_user_cargo() = 'gerente' AND
+  filial_id = public.get_auth_user_filial_id()
+);
+
+CREATE POLICY "Exclusao Inativos Apenas Gerente Filial" ON public.produtos_filiais_inativos
+FOR DELETE USING (
+  public.get_auth_user_cargo() = 'gerente' AND
+  filial_id = public.get_auth_user_filial_id()
+);
+
+GRANT SELECT, INSERT, DELETE ON public.produtos_filiais_inativos TO authenticated;
+
+-- Atualização DML de Produtos Legados ('GERAL'/'Geral') para Categorias Oficiais
+UPDATE public.produtos SET descricao = 'COLAR' WHERE nome IN ('Colar de prata', 'Colar de ouro') AND (descricao IS NULL OR descricao IN ('GERAL', 'Geral', ''));
+UPDATE public.produtos SET descricao = 'ANEL' WHERE nome IN ('Anel de prata', 'Anel de ouro') AND (descricao IS NULL OR descricao IN ('GERAL', 'Geral', ''));
+UPDATE public.produtos SET descricao = 'BRINCO' WHERE nome IN ('Brinco de prata', 'Brinco de ouro') AND (descricao IS NULL OR descricao IN ('GERAL', 'Geral', ''));
+UPDATE public.produtos SET descricao = 'SOLITARIA' WHERE nome IN ('Solitária') AND (descricao IS NULL OR descricao IN ('GERAL', 'Geral', ''));
+UPDATE public.produtos SET descricao = 'PULSEIRA' WHERE nome IN ('Pulseira de prata', 'Pulseira de ouro') AND (descricao IS NULL OR descricao IN ('GERAL', 'Geral', ''));
+
+-- Constraint de Validação de Categoria em public.produtos
+ALTER TABLE public.produtos DROP CONSTRAINT IF EXISTS produtos_categoria_check;
+ALTER TABLE public.produtos ADD CONSTRAINT produtos_categoria_check
+CHECK (descricao IN ('ANEL', 'PULSEIRA', 'SOLITARIA', 'COLAR', 'BRINCO'));
+
 -- 7. POLÍTICAS E CONCESSÕES DA TABELA 'estoques'
 CREATE POLICY "Leitura Estoques por Perfil" ON public.estoques
 FOR SELECT USING (
@@ -207,6 +248,93 @@ FOR UPDATE USING (
 );
 
 GRANT SELECT, INSERT, UPDATE ON public.estoques TO authenticated;
+
+-- RPC Transacional Atômico para Ajuste de Estoque
+-- Bloqueia a linha de estoque com SELECT FOR UPDATE, impede saldo negativo, atualiza saldo e registra a movimentação auditável na mesma transação.
+CREATE OR REPLACE FUNCTION public.ajustar_estoque_rpc(
+  p_produto_id bigint,
+  p_filial_id bigint,
+  p_tipo text,
+  p_quantidade integer,
+  p_motivo text DEFAULT NULL
+)
+RETURNS json
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+DECLARE
+  v_user_email text;
+  v_user_id bigint;
+  v_user_cargo text;
+  v_user_filial_id bigint;
+  v_qtd_ant integer;
+  v_qtd_nova integer;
+BEGIN
+  v_user_email := (auth.jwt() ->> 'email');
+  IF v_user_email IS NULL THEN
+    RAISE EXCEPTION 'Acesso negado: Usuario nao autenticado.';
+  END IF;
+
+  SELECT id, cargo, filial_id INTO v_user_id, v_user_cargo, v_user_filial_id
+  FROM public.usuarios
+  WHERE email = v_user_email AND ativo = true
+  LIMIT 1;
+
+  IF v_user_id IS NULL THEN
+    RAISE EXCEPTION 'Acesso negado: Conta invalida ou inativa.';
+  END IF;
+
+  IF v_user_cargo != 'gerente' AND v_user_filial_id != p_filial_id THEN
+    RAISE EXCEPTION 'Acesso negado: Funcionarios so podem alterar o estoque de sua propria filial.';
+  END IF;
+
+  IF p_quantidade <= 0 THEN
+    RAISE EXCEPTION 'Operacao negada: Quantidade de ajuste deve ser um inteiro maior que zero.';
+  END IF;
+
+  IF p_tipo NOT IN ('entrada', 'saida') THEN
+    RAISE EXCEPTION 'Operacao negada: Tipo de ajuste invalido (%). Use entrada ou saida.', p_tipo;
+  END IF;
+
+  -- 1. Obter e bloquear linha do estoque (SELECT FOR UPDATE)
+  SELECT COALESCE(
+    (SELECT quantidade FROM public.estoques WHERE filial_id = p_filial_id AND produto_id = p_produto_id FOR UPDATE),
+    0
+  ) INTO v_qtd_ant;
+
+  IF p_tipo = 'saida' THEN
+    IF v_qtd_ant < p_quantidade THEN
+      RAISE EXCEPTION 'Saldo insuficiente na filial para realizar a saida (disponivel: %, solicitado: %).', v_qtd_ant, p_quantidade;
+    END IF;
+    v_qtd_nova := v_qtd_ant - p_quantidade;
+  ELSE
+    v_qtd_nova := v_qtd_ant + p_quantidade;
+  END IF;
+
+  -- 2. Atualizar ou inserir estoque de forma atômica
+  INSERT INTO public.estoques (filial_id, produto_id, quantidade, status, updated_at)
+  VALUES (p_filial_id, p_produto_id, v_qtd_nova, CASE WHEN v_qtd_nova = 0 THEN 'zerado' ELSE 'suficiente' END, now())
+  ON CONFLICT (filial_id, produto_id) DO UPDATE
+  SET quantidade = EXCLUDED.quantidade,
+      status = EXCLUDED.status,
+      updated_at = now();
+
+  -- 3. Registrar movimentação auditável no histórico
+  INSERT INTO public.movimentacoes (produto_id, filial_id, usuario_id, tipo, quantidade, quantidade_anterior, quantidade_nova, motivo, created_at)
+  VALUES (p_produto_id, p_filial_id, v_user_id, p_tipo, p_quantidade, v_qtd_ant, v_qtd_nova, COALESCE(p_motivo, 'Ajuste manual de estoque'), now());
+
+  RETURN json_build_object(
+    'success', true,
+    'message', 'Estoque ajustado com sucesso.',
+    'quantidade_anterior', v_qtd_ant,
+    'quantidade_nova', v_qtd_nova
+  );
+END;
+$$;
+
+REVOKE EXECUTE ON FUNCTION public.ajustar_estoque_rpc(bigint, bigint, text, integer, text) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.ajustar_estoque_rpc(bigint, bigint, text, integer, text) TO authenticated;
 
 -- 8. POLÍTICAS E CONCESSÕES DA TABELA 'movimentacoes'
 CREATE POLICY "Leitura Movimentacoes por Perfil" ON public.movimentacoes

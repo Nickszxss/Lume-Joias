@@ -126,7 +126,8 @@ O banco de dados relacional PostgreSQL no Supabase contém 8 tabelas principais 
 ### 6.1 Esquema do Banco de Dados Real
 1. **`usuarios`** (`id`, `nome`, `email`, `senha`, `cargo`, `tipo`, `filial_id`, `ativo`, `created_at`) — Cadastro dos perfis dos usuários e vinculação de filial.
 2. **`filiais`** (`id`, `nome`, `endereco`, `cidade`, `estado`, `ativa`, `created_at`) — Cadastro das 5 filiais oficiais (Centro, Norte, Sul, Leste, Oeste).
-3. **`produtos`** (`id`, `nome`, `descricao`, `codigo`, `unidade_medida`, `qtd_minima`, `ativo`, `created_at`) — Catálogo de produtos/joias com SKUs (código) e controle de inativação lógica.
+3. **`produtos`** (`id`, `nome`, `descricao`, `codigo`, `unidade_medida`, `qtd_minima`, `ativo`, `created_at`) — Catálogo de produtos/joias com SKUs (código) e categorias automáticas (`ANEL`, `PULSEIRA`, `SOLITARIA`, `COLAR`, `BRINCO`).
+4. **`produtos_filiais_inativos`** (`id`, `produto_id`, `filial_id`, `desativado_por`, `created_at`) — Registro de inativação/retirada de uso local por produto e filial solicitada por gerentes.
 4. **`estoques`** (`id`, `filial_id`, `produto_id`, `quantidade`, `status`, `updated_at`) — Saldo atual de cada produto por filial.
 5. **`movimentacoes`** (`id`, `produto_id`, `filial_id`, `usuario_id`, `tipo`, `quantidade`, `quantidade_anterior`, `quantidade_nova`, `motivo`, `created_at`) — Histórico auditável de movimentações.
 6. **`transferencias`** (`id`, `origem_id`, `destino_id`, `produto_id`, `usuario_id`, `quantidade`, `status`, `observacao`, `created_at`, `concluida_at`) — Registro de solicitações de transferência inter-filiais (`pendente`, `concluida`).
@@ -135,10 +136,10 @@ O banco de dados relacional PostgreSQL no Supabase contém 8 tabelas principais 
 
 ### 6.2 Políticas de Segurança RLS (Row Level Security)
 As políticas RLS estão definidas em `supabase_rls_policies.sql` e garantem a nível de banco:
-- **`public.usuarios` (Correção P0 Endurecida - Tarefa 15):** Leitura restrita ao próprio perfil do usuário autenticado (`email = auth.jwt() ->> 'email'`) ou a gerentes estritamente para usuários da sua própria filial (`filial_id = public.get_auth_user_filial_id()`), bloqueando consultas cross-filial. Remoção de políticas de todas as 8 tabelas públicas via bloco PL/pgSQL dinâmico e idempotente. Bloqueio total de leitura anônima, revogação no nível de tabela e de colunas (`REVOKE ALL & REVOKE UPDATE (todas_colunas)`). Concessão de privilégios de coluna limitados (`GRANT SELECT (...)` omitindo `senha` e `GRANT UPDATE (nome)`). As funções auxiliares `get_auth_user_cargo()` e `get_auth_user_filial_id()` foram endurecidas com `SET search_path = ''`, sintaxe `COALESCE` padronizada e qualificações explícitas contra hijacks, com `REVOKE EXECUTE ... FROM PUBLIC, anon`. A amarração de perfil utiliza o e-mail autenticado único do JWT (`email UNIQUE`).
+- **`public.usuarios` (Correção P0 Endurecida - Tarefa 15):** Leitura restrita ao próprio perfil do usuário autenticado (`email = auth.jwt() ->> 'email'`) ou a gerentes estritamente para usuários da sua própria filial (`filial_id = public.get_auth_user_filial_id()`), bloqueando consultas cross-filial.
+- **Ajuste Atômico de Estoque (`ajustar_estoque_rpc`):** Processamento transacional com bloqueio pessimista `SELECT FOR UPDATE`, impedindo saldos negativos em nivel de banco e registrando a movimentação atômica em `public.movimentacoes`.
+- **Inativação Local por Filial (`produtos_filiais_inativos`):** RLS que restringe o registro de retirada de uso de produtos exclusivamente a gerentes da própria filial (`public.get_auth_user_cargo() = 'gerente' AND filial_id = public.get_auth_user_filial_id()`), sem alterar o cadastro global nem as demais filiais.
 - Leitura de produtos, estoques e filiais para qualquer usuário autenticado.
-- Alteração de saldo de estoque apenas permitida para usuários autorizados da respectiva filial.
-- Restrição para gerentes na edição/inativação de produtos e conclusão de transferências.
 
 ---
 
@@ -179,10 +180,10 @@ No cadastro de novos produtos, o tipo/nome da joia é selecionado obrigatoriamen
 #### Garantia de Unicidade de SKU:
 Para evitar erro HTTP 409 (`produtos_codigo_key` duplicate key violation), a função `api.criarProduto` verifica o banco e adiciona sufixos numéricos sequenciais automáticos quando o SKU base já existir (ex: `03`, `03-1`, `03-2`).
 
-### 8.2 Estoque e Estoque Mínimo
-- No momento do cadastro do produto, o usuário escolhe a **Quantidade Mínima** de referência (`10`, `30` ou `50` unidades) no dropdown `#p-min`.
-- O produto é inicializado na tabela `estoques` com quantidade `0` (status `Zerado`).
-- O sistema sinaliza visualmente produtos com saldo abaixo do estoque mínimo como alertas de reposição necessária.
+### 8.2 Estoque e Categorias Automáticas
+- A categoria do produto é determinada automaticamente com base no tipo do produto e validada por `CHECK constraint` no banco: `ANEL`, `PULSEIRA`, `SOLITARIA`, `COLAR` e `BRINCO`.
+- A funcionalidade de Estoque Mínimo foi descontinuada e removida da UI para simplificar o controle operacional, mantendo os status de saldo como **Disponível** (`quantidade > 0`) e **Zerado** (`quantidade = 0`).
+- Todas as operações de ajuste de estoque utilizam a RPC atômica `ajustar_estoque_rpc` com bloqueio pessimista `SELECT FOR UPDATE`.
 
 ### 8.3 Edição e Inativação Lógica de Produtos
 - **Apenas Gerentes** têm permissão no frontend e no RLS para editar dados de um produto ou inativá-lo (`api.inativarProduto`).

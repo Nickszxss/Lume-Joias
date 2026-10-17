@@ -363,27 +363,49 @@ const api = {
     return apiRequest(`/produtos/${id}`, { method: 'PUT', body: JSON.stringify(dados) });
   },
 
-  inativarProduto: async (id) => {
+  inativarProdutoLocal: async (produtoId, filialId) => {
     if (usuario && usuario.tipo !== 'gerente') {
-      throw new Error('Apenas gerentes possuem permissão para inativar produtos.');
+      throw new Error('Apenas gerentes possuem permissão para retirar produtos de uso.');
+    }
+
+    const targetFilial = filialId || (usuario ? usuario.filial_id : null);
+    if (!targetFilial) {
+      throw new Error('Filial não identificada para inativação local.');
+    }
+
+    if (usuario && usuario.tipo === 'gerente' && usuario.filial_id && targetFilial != usuario.filial_id) {
+      throw new Error('Gerente só pode retirar de uso produtos da sua própria filial.');
     }
 
     const client = getSupabaseClient();
     if (client) {
       const { data, error } = await client
-        .from('produtos')
-        .update({ ativo: false })
-        .eq('id', id)
+        .from('produtos_filiais_inativos')
+        .insert([{
+          produto_id: parseInt(produtoId),
+          filial_id: parseInt(targetFilial),
+          desativado_por: usuario ? usuario.id : null
+        }])
         .select()
         .single();
 
-      if (error) {
-        throw new Error(error.message || 'Erro ao inativar produto no Supabase.');
+      if (error && error.code !== '23505') {
+        throw new Error(error.message || 'Erro ao inativar produto na filial.');
       }
-      notificarRealtime('produtos', { id });
-      return data;
+
+      notificarRealtime('produtos_filiais_inativos', { produto_id: produtoId, filial_id: targetFilial });
+      return data || { success: true };
     }
-    return apiRequest(`/produtos/${id}/inativar`, { method: 'PATCH' });
+    return apiRequest(`/produtos/${produtoId}/inativar-local`, { method: 'POST', body: JSON.stringify({ filialId: targetFilial }) });
+  },
+
+  listarInativosLocais: async () => {
+    const client = getSupabaseClient();
+    if (client) {
+      const { data, error } = await client.from('produtos_filiais_inativos').select('*');
+      if (!error && data) return data;
+    }
+    return apiRequest('/produtos/inativos-locais');
   },
 
   criarProduto: async (dados) => {
@@ -490,66 +512,25 @@ const api = {
 
     const client = getSupabaseClient();
     if (client) {
-      const { data: currentStock, error: cErr } = await client
-        .from('estoques')
-        .select('*')
-        .eq('produto_id', dados.produtoId)
-        .eq('filial_id', dados.filialId)
-        .maybeSingle();
+      const { data, error } = await client.rpc('ajustar_estoque_rpc', {
+        p_produto_id: parseInt(dados.produtoId),
+        p_filial_id: parseInt(dados.filialId),
+        p_tipo: dados.tipo,
+        p_quantidade: parseInt(dados.quantidade),
+        p_motivo: dados.motivo || 'Ajuste manual'
+      });
 
-      if (cErr) {
-        throw new Error(cErr.message || 'Erro ao consultar estoque atual.');
+      if (error) {
+        throw new Error(error.message || 'Erro ao executar ajuste de estoque.');
       }
 
-      const anterior = currentStock ? currentStock.quantidade : 0;
-      if (dados.tipo === 'saida' && anterior < dados.quantidade) {
-        throw new Error(`Saldo insuficiente na filial para realizar a saída (disponível: ${anterior}, solicitado: ${dados.quantidade}).`);
-      }
-
-      const novaQtd = dados.tipo === 'entrada'
-        ? anterior + dados.quantidade
-        : Math.max(0, anterior - dados.quantidade);
-
-      const { data: prd, error: prdErr } = await client.from('produtos').select('*').eq('id', dados.produtoId).single();
-      if (prdErr) {
-        throw new Error(prdErr.message || 'Produto não encontrado para ajuste.');
-      }
-
-      const minQtd = prd ? (prd.qtd_minima || 0) : 0;
-      const st = novaQtd === 0 ? 'zerado' : (novaQtd <= minQtd ? 'baixo' : 'suficiente');
-
-      if (currentStock) {
-        const { error: updErr } = await client
-          .from('estoques')
-          .update({ quantidade: novaQtd, status: st, updated_at: new Date().toISOString() })
-          .eq('id', currentStock.id);
-        if (updErr) throw new Error(updErr.message || 'Erro ao atualizar registro de estoque.');
-      } else {
-        const { error: insErr } = await client
-          .from('estoques')
-          .insert([{ produto_id: dados.produtoId, filial_id: dados.filialId, quantidade: novaQtd, status: st }]);
-        if (insErr) throw new Error(insErr.message || 'Erro ao criar registro de estoque.');
-      }
-
-      const { error: movErr } = await client.from('movimentacoes').insert([{
-        produto_id: dados.produtoId,
-        filial_id: dados.filialId,
-        tipo: dados.tipo,
-        quantidade: dados.quantidade,
-        quantidade_anterior: anterior,
-        quantidade_nova: novaQtd,
-        usuario_id: usuario ? usuario.id : null,
-        motivo: dados.motivo || 'Ajuste manual',
-        created_at: new Date().toISOString()
-      }]);
-
-      if (movErr) {
-        console.warn('Erro ao registrar histórico de movimentação:', movErr.message);
+      if (data && data.success === false) {
+        throw new Error(data.message || 'Não foi possível realizar o ajuste de estoque.');
       }
 
       notificarRealtime('estoques', { produto_id: dados.produtoId, filial_id: dados.filialId });
       notificarRealtime('movimentacoes', { produto_id: dados.produtoId, filial_id: dados.filialId });
-      return { produto_id: dados.produtoId, filial_id: dados.filialId, quantidade: novaQtd, status: st };
+      return data || { success: true };
     }
     return apiRequest('/estoque/ajustar', { method: 'POST', body: JSON.stringify(dados) });
   },
@@ -970,6 +951,7 @@ let usuario = null;
 let FILIAIS = [];
 let produtos = [];
 let estoques = [];
+let inativosLocais = [];
 let movimentacoes = [];
 let transferencias = [];
 let pedidos = [];
@@ -1087,12 +1069,11 @@ const nomeProduto = id => produtos.find(p=>p.id===id)?.nome || '—';
 const skuProduto = id => produtos.find(p=>p.id===id)?.sku || '—';
 const minProduto = id => produtos.find(p=>p.id===id)?.qtd_minima || 0;
 
-function statusEstoque(qtd, min){
-  if(qtd === 0) return 'zerado';
-  if(qtd <= min) return 'baixo';
+function statusEstoque(qtd){
+  if(qtd === 0 || qtd <= 0) return 'zerado';
   return 'suficiente';
 }
-const STATUS_LABEL = {suficiente:'Suficiente', baixo:'Baixo', zerado:'Zerado'};
+const STATUS_LABEL = {suficiente:'Disponível', zerado:'Zerado'};
 
 function toast(msg, erro=false){
   const t = $('toast');
@@ -1459,6 +1440,7 @@ async function renderProdutos(){
   try {
     produtos = await api.listarProdutos();
     estoques = await api.listarEstoque();
+    inativosLocais = await api.listarInativosLocais();
     pintarProdutos();
   } catch (err) {
     const tb = $('tbody-produtos');
@@ -1489,28 +1471,33 @@ function pintarProdutos(){
         filteredEstoques = filteredEstoques.filter(e => e.filial_id == usuario.filial_id);
       }
       filteredEstoques.forEach(e => {
-        const status = e.status ?? statusEstoque(e.quantidade, p.qtd_minima);
+        const status = statusEstoque(e.quantidade);
         if(st && status !== st) return;
 
-        let statusBadge = `<span class="badge ${status==='zerado'?'danger':status==='baixo'?'warn':'ok'}">${STATUS_LABEL[status]}</span>`;
-        if (p.ativo === false) {
-          statusBadge += ` <span class="badge danger" style="background:#ef444422; color:#ef4444; margin-left:4px;">Inativo</span>`;
+        const isInativoNaFilial = inativosLocais.some(i => String(i.produto_id) === String(p.id) && String(i.filial_id) === String(e.filial_id));
+
+        let statusBadge = `<span class="badge ${status==='zerado'?'danger':'ok'}">${STATUS_LABEL[status]}</span>`;
+        if (p.ativo === false || isInativoNaFilial) {
+          statusBadge += ` <span class="badge danger" style="background:#ef444422; color:#ef4444; margin-left:4px;">Inativo na Filial</span>`;
         }
 
         let acoesHtml = `<button class="btn-sm btn-secondary" onclick="abrirModalAjuste(${p.id}, ${e.filial_id})">Ajustar</button>`;
-        if (isGerente) {
+        if (isGerente && usuario && usuario.filial_id == e.filial_id) {
           acoesHtml += `
             <button class="btn-sm btn-secondary" style="margin-left:4px;" onclick="abrirModalEditarProduto(${p.id})">Editar</button>
-            ${p.ativo !== false ? `<button class="btn-sm btn-secondary" style="margin-left:4px; color:var(--danger-color, #ef4444);" onclick="inativarPrd(${p.id}, this)">Inativar</button>` : ''}
+            ${(!isInativoNaFilial && p.ativo !== false) ? `<button class="btn-sm btn-secondary" style="margin-left:4px; color:var(--danger-color, #ef4444);" onclick="inativarPrd(${p.id}, ${e.filial_id}, this)">Inativar</button>` : ''}
+          `;
+        } else if (isGerente) {
+          acoesHtml += `
+            <button class="btn-sm btn-secondary" style="margin-left:4px;" onclick="abrirModalEditarProduto(${p.id})">Editar</button>
           `;
         }
 
         html += `
-          <tr class="${p.ativo === false ? 'row-inativo' : ''}">
+          <tr class="${(p.ativo === false || isInativoNaFilial) ? 'row-inativo' : ''}">
             <td><code>${escapeHtml(p.sku)}</code></td>
             <td><b>${escapeHtml(p.nome)}</b></td>
             <td>${escapeHtml(p.categoria)}</td>
-            <td>${p.qtd_minima}</td>
             <td>${escapeHtml(nomeFilial(e.filial_id))}</td>
             <td>${e.quantidade}</td>
             <td>${statusBadge}</td>
@@ -1535,8 +1522,7 @@ function abrirModalEditarProduto(id) {
   $('ep-id').value = prd.id;
   $('ep-nome').value = prd.nome;
   $('ep-sku').value = prd.sku;
-  $('ep-cat').value = prd.categoria || '';
-  $('ep-min').value = prd.qtd_minima ?? 10;
+  $('ep-cat').value = obterCategoriaPorNome(prd.nome);
 
   const overlay = $('modal-overlay');
   const modalE = $('modal-editar-produto');
@@ -1551,23 +1537,17 @@ async function salvarEdicaoProduto() {
   const id = parseInt($('ep-id').value);
   const nome = $('ep-nome').value.trim();
   const sku = $('ep-sku').value.trim();
-  const categoria = $('ep-cat').value.trim();
-  const minRaw = $('ep-min').value;
-  const qtd_minima = parseInt(minRaw);
+  const categoria = obterCategoriaPorNome(nome);
 
   if (!nome || !sku) {
     toast('Nome e SKU são obrigatórios.', true);
-    return;
-  }
-  if (!Number.isInteger(qtd_minima) || qtd_minima < 0) {
-    toast('Quantidade mínima deve ser um número inteiro válido maior ou igual a zero.', true);
     return;
   }
 
   if (saveBtn) saveBtn.disabled = true;
 
   try {
-    await api.editarProduto(id, { nome, sku, categoria, qtd_minima });
+    await api.editarProduto(id, { nome, sku, categoria, qtd_minima: 0 });
     fecharModal();
     toast('Produto atualizado com sucesso!');
     renderProdutos();
@@ -1578,7 +1558,7 @@ async function salvarEdicaoProduto() {
   }
 }
 
-async function inativarPrd(id, btn) {
+async function inativarPrd(id, filialId, btn) {
   if (usuario && usuario.tipo !== 'gerente') {
     toast('Apenas gerentes podem inativar produtos.', true);
     return;
@@ -1586,7 +1566,13 @@ async function inativarPrd(id, btn) {
   const prd = produtos.find(p => p.id === id);
   if (!prd) return;
 
-  if (!confirm(`Deseja realmente inativar o produto "${prd.nome}"?`)) {
+  const targetFilial = filialId || (usuario ? usuario.filial_id : null);
+  if (usuario && usuario.tipo === 'gerente' && usuario.filial_id && targetFilial != usuario.filial_id) {
+    toast('Acesso negado: Gerente só pode retirar de uso produtos da sua própria filial.', true);
+    return;
+  }
+
+  if (!confirm(`Deseja realmente retirar de uso o produto "${prd.nome}" na filial ${nomeFilial(targetFilial)}?`)) {
     return;
   }
 
@@ -1594,11 +1580,11 @@ async function inativarPrd(id, btn) {
   if (btn) btn.disabled = true;
 
   try {
-    await api.inativarProduto(id);
-    toast(`Produto "${prd.nome}" inativado com sucesso!`);
+    await api.inativarProdutoLocal(id, targetFilial);
+    toast(`Produto "${prd.nome}" retirado de uso na filial ${nomeFilial(targetFilial)} com sucesso!`);
     renderProdutos();
   } catch (err) {
-    toast(err.message || 'Não foi possível inativar o produto.', true);
+    toast(err.message || 'Não foi possível inativar o produto na filial.', true);
   } finally {
     if (btn) btn.disabled = false;
   }
@@ -1616,6 +1602,25 @@ const MAPA_SKU = {
   'Pulseira de ouro': '09'
 };
 
+const MAPA_CATEGORIAS_OFICIAIS = {
+  'anel de ouro': 'ANEL',
+  'anel de prata': 'ANEL',
+  'pulseira de ouro': 'PULSEIRA',
+  'pulseira de prata': 'PULSEIRA',
+  'solitária': 'SOLITARIA',
+  'solitaria': 'SOLITARIA',
+  'colar de ouro': 'COLAR',
+  'colar de prata': 'COLAR',
+  'brinco de ouro': 'BRINCO',
+  'brinco de prata': 'BRINCO'
+};
+
+function obterCategoriaPorNome(nome) {
+  if (!nome) return 'ANEL';
+  const nomeLower = nome.trim().toLowerCase();
+  return MAPA_CATEGORIAS_OFICIAIS[nomeLower] || 'ANEL';
+}
+
 function obterSkuPorNome(nome) {
   if (!nome) return '01';
   const nomeLower = nome.trim().toLowerCase();
@@ -1628,9 +1633,11 @@ function obterSkuPorNome(nome) {
 function atualizarSkuPorTipo() {
   const pNome = $('p-nome');
   const pSku = $('p-sku');
-  if (pNome && pSku) {
+  const pCat = $('p-cat');
+  if (pNome) {
     const tipo = pNome.value;
-    pSku.value = obterSkuPorNome(tipo);
+    if (pSku) pSku.value = obterSkuPorNome(tipo);
+    if (pCat) pCat.value = obterCategoriaPorNome(tipo);
   }
 }
 
@@ -1662,7 +1669,7 @@ async function salvarProduto(){
 
   const nome = $('p-nome') ? $('p-nome').value.trim() : '';
   const sku = $('p-sku') ? $('p-sku').value.trim() : '';
-  const categoria = $('p-cat') ? $('p-cat').value.trim() : '';
+  const categoria = obterCategoriaPorNome(nome);
   const filialId = parseInt($('p-filial') ? $('p-filial').value : 0);
   const minRaw = $('p-min') ? $('p-min').value : '10';
   const qtd_minima = parseInt(minRaw);
@@ -1691,11 +1698,25 @@ async function renderEstoque(){
   try {
     estoques = await api.listarEstoque(filialEstoqueSel);
     if(produtos.length === 0) produtos = await api.listarProdutos();
+    atualizarSelectFiltroProdutoEstoque();
     pintarEstoque();
   } catch (err) {
     const tb = $('tbody-estoque');
     if (tb) tb.innerHTML = '<tr><td colspan="7" class="empty-state">Não foi possível carregar o estoque.</td></tr>';
   }
+}
+
+function atualizarSelectFiltroProdutoEstoque() {
+  const selectP = $('filtro-estoque-produto');
+  if (!selectP) return;
+
+  const currentVal = selectP.value;
+  const options = ['<option value="">Todos os produtos</option>'];
+  produtos.forEach(p => {
+    options.push(`<option value="${p.id}">${escapeHtml(p.nome)} (${escapeHtml(p.sku)})</option>`);
+  });
+  selectP.innerHTML = options.join('');
+  if (currentVal) selectP.value = currentVal;
 }
 
 function pintarEstoque(){
@@ -1709,21 +1730,25 @@ function pintarEstoque(){
     list = list.filter(e => e.filial_id == filialEstoqueSel);
   }
 
+  const prodSel = $('filtro-estoque-produto') ? $('filtro-estoque-produto').value : '';
+  if (prodSel) {
+    list = list.filter(e => String(e.produto_id) === String(prodSel));
+  }
+
   if(list.length === 0){
-    tb.innerHTML = '<tr><td colspan="7" class="empty-state">Nenhum produto cadastrado ainda neste filtro.</td></tr>';
+    tb.innerHTML = '<tr><td colspan="6" class="empty-state">Nenhum produto cadastrado ainda neste filtro.</td></tr>';
     return;
   }
   tb.innerHTML = list.map(e => {
     const p = produtos.find(prd => String(prd.id) === String(e.produto_id)) || {};
-    const st = e.status ?? statusEstoque(e.quantidade, p.qtd_minima);
+    const st = statusEstoque(e.quantidade);
     return `
       <tr>
         <td><code>${escapeHtml(p.sku ?? '—')}</code></td>
         <td><b>${escapeHtml(p.nome ?? '—')}</b></td>
         <td>${escapeHtml(nomeFilial(e.filial_id))}</td>
         <td>${e.quantidade}</td>
-        <td>${p.qtd_minima ?? '—'}</td>
-        <td><span class="badge ${st==='zerado'?'danger':st==='baixo'?'warn':'ok'}">${STATUS_LABEL[st]}</span></td>
+        <td><span class="badge ${st==='zerado'?'danger':'ok'}">${STATUS_LABEL[st]}</span></td>
         <td><button class="btn-sm btn-secondary" onclick="abrirModalAjuste(${e.produto_id}, ${e.filial_id})">Ajustar</button></td>
       </tr>`;
   }).join('');

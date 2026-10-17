@@ -600,107 +600,12 @@ const api = {
   concluirTransferencia: async (id) => {
     const client = getSupabaseClient();
     if (client) {
-      const { data: transf } = await client.from('transferencias').select('*').eq('id', id).single();
-      if (!transf) {
-        throw new Error('Transferência não encontrada.');
+      const { data, error } = await client.rpc('concluir_transferencia_rpc', { p_transferencia_id: id });
+      if (error) {
+        throw new Error(error.message || 'Erro ao concluir transferência.');
       }
-      if (transf.status === 'concluida') {
-        throw new Error('Esta transferência já foi concluída anteriormente.');
-      }
-
-      const origId = transf.origem_id || transf.origem_filial_id;
-      const destId = transf.destino_id || transf.destino_filial_id;
-
-      // Validação de permissão: Apenas gerente ou funcionário da filial de destino podem concluir
-      const isGerente = usuario && usuario.tipo === 'gerente';
-      const isDestino = usuario && usuario.filial_id && String(usuario.filial_id) === String(destId);
-
-      if (!isGerente && !isDestino) {
-        if (usuario && usuario.filial_id && String(usuario.filial_id) === String(origId)) {
-          throw new Error('Acesso negado: A filial de origem não tem permissão para concluir a transferência.');
-        } else {
-          throw new Error('Acesso negado: Apenas a filial de destino ou um gerente pode concluir esta transferência.');
-        }
-      }
-
-      // Buscar estoques de origem e destino
-      const { data: origEst } = await client.from('estoques').select('*').eq('produto_id', transf.produto_id).eq('filial_id', origId).single();
-      const { data: destEst } = await client.from('estoques').select('*').eq('produto_id', transf.produto_id).eq('filial_id', destId).single();
-
-      const origQtdAnt = origEst ? origEst.quantidade : 0;
-      if (origQtdAnt < transf.quantidade) {
-        throw new Error(`Estoque insuficiente na filial de origem para concluir a transferência (disponível: ${origQtdAnt}).`);
-      }
-
-      const novOrig = origQtdAnt - transf.quantidade;
-      const destQtdAnt = destEst ? destEst.quantidade : 0;
-      const novDest = destQtdAnt + transf.quantidade;
-
-      // Buscar dados do produto para recalcular status
-      const { data: prd } = await client.from('produtos').select('*').eq('id', transf.produto_id).single();
-      const minQtd = prd ? (prd.qtd_minima || 0) : 0;
-
-      const stOrig = novOrig === 0 ? 'zerado' : (novOrig <= minQtd ? 'baixo' : 'suficiente');
-      const stDest = novDest === 0 ? 'zerado' : (novDest <= minQtd ? 'baixo' : 'suficiente');
-
-      // Atualização atômica do status da transferência para 'concluida'
-      const { error: updateTransfErr } = await client
-        .from('transferencias')
-        .update({ status: 'concluida' })
-        .eq('id', id)
-        .neq('status', 'concluida');
-
-      if (updateTransfErr) {
-        throw new Error('Operação já concluída ou inválida.');
-      }
-
-      // Atualizar estoque de origem
-      if (origEst) {
-        await client.from('estoques').update({ quantidade: novOrig, status: stOrig, updated_at: new Date().toISOString() }).eq('id', origEst.id);
-      } else {
-        await client.from('estoques').insert([{ produto_id: transf.produto_id, filial_id: origId, quantidade: novOrig, status: stOrig }]);
-      }
-
-      // Atualizar estoque de destino
-      if (destEst) {
-        await client.from('estoques').update({ quantidade: novDest, status: stDest, updated_at: new Date().toISOString() }).eq('id', destEst.id);
-      } else {
-        await client.from('estoques').insert([{ produto_id: transf.produto_id, filial_id: destId, quantidade: novDest, status: stDest }]);
-      }
-
-      // Registrar 2 movimentações no histórico: 1 saída na origem, 1 entrada no destino
-      const dataHora = new Date().toISOString();
-      const usrId = usuario ? usuario.id : (transf.usuario_id || null);
-
-      await client.from('movimentacoes').insert([
-        {
-          produto_id: transf.produto_id,
-          filial_id: origId,
-          tipo: 'saida',
-          quantidade: transf.quantidade,
-          quantidade_anterior: origQtdAnt,
-          quantidade_nova: novOrig,
-          usuario_id: usrId,
-          motivo: `Transferência #${transf.id} para ${nomeFilial(destId)}`,
-          created_at: dataHora
-        },
-        {
-          produto_id: transf.produto_id,
-          filial_id: destId,
-          tipo: 'entrada',
-          quantidade: transf.quantidade,
-          quantidade_anterior: destQtdAnt,
-          quantidade_nova: novDest,
-          usuario_id: usrId,
-          motivo: `Transferência #${transf.id} vinda de ${nomeFilial(origId)}`,
-          created_at: dataHora
-        }
-      ]);
-
       notificarRealtime('transferencias', { id });
-      notificarRealtime('estoques', { produto_id: transf.produto_id });
-      notificarRealtime('movimentacoes', { produto_id: transf.produto_id });
-      return { ...transf, status: 'concluida' };
+      return data;
     }
     return apiRequest(`/transferencias/${id}/concluir`, { method: 'PATCH' });
   },
@@ -817,95 +722,12 @@ const api = {
   receberPedido: async (id) => {
     const client = getSupabaseClient();
     if (client) {
-      // 1. Buscar dados do pedido de compra
-      const { data: pedido, error: pErr } = await client.from('pedidos_compra').select('*').eq('id', id).single();
-      if (pErr || !pedido) {
-        throw new Error('Pedido de compra não encontrado.');
+      const { data, error } = await client.rpc('receber_pedido_rpc', { p_pedido_id: id });
+      if (error) {
+        throw new Error(error.message || 'Erro ao receber pedido de compra.');
       }
-
-      if (pedido.status === 'recebido') {
-        throw new Error('Este pedido de compra já foi marcado como recebido anteriormente.');
-      }
-
-      if (usuario && usuario.tipo === 'funcionario' && usuario.filial_id && String(pedido.filial_id) !== String(usuario.filial_id)) {
-        throw new Error('Acesso negado: Você só pode receber pedidos da sua própria filial.');
-      }
-
-      // 2. Buscar itens do pedido na tabela itens_pedido_compra
-      const { data: itens } = await client.from('itens_pedido_compra').select('*').eq('pedido_id', id);
-
-      const dataHora = new Date().toISOString();
-      const usrId = usuario ? usuario.id : null;
-
-      // 3. Atualizar status do pedido para 'recebido' de forma atômica
-      const { error: updateErr } = await client
-        .from('pedidos_compra')
-        .update({
-          status: 'recebido',
-          recebido_at: dataHora
-        })
-        .eq('id', id)
-        .neq('status', 'recebido');
-
-      if (updateErr) {
-        throw new Error('Não foi possível alterar o status do pedido (já recebido ou sem permissão).');
-      }
-
-      // 4. Se houver itens na tabela 'itens_pedido_compra', utilizar os itens. Caso contrário, utilizar os campos do pedido pai.
-      const listaItens = (itens && itens.length > 0) ? itens : [{ produto_id: pedido.produto_id, quantidade: pedido.quantidade }];
-
-      for (const item of listaItens) {
-        const prodId = item.produto_id;
-        const qtdRecebida = item.quantidade;
-        const filId = pedido.filial_id;
-
-        if (!prodId || !qtdRecebida) continue;
-
-        // Buscar estoque atual
-        const { data: curEst } = await client
-          .from('estoques')
-          .select('*')
-          .eq('produto_id', prodId)
-          .eq('filial_id', filId)
-          .single();
-
-        const antQtd = curEst ? curEst.quantidade : 0;
-        const novQtd = antQtd + qtdRecebida;
-
-        // Buscar produto para validar quantidade mínima
-        const { data: prd } = await client.from('produtos').select('*').eq('id', prodId).single();
-        const minQtd = prd ? (prd.qtd_minima || 0) : 0;
-        const st = novQtd === 0 ? 'zerado' : (novQtd <= minQtd ? 'baixo' : 'suficiente');
-
-        if (curEst) {
-          await client
-            .from('estoques')
-            .update({ quantidade: novQtd, status: st, updated_at: dataHora })
-            .eq('id', curEst.id);
-        } else {
-          await client
-            .from('estoques')
-            .insert([{ produto_id: prodId, filial_id: filId, quantidade: novQtd, status: st }]);
-        }
-
-        // Registrar movimentação de entrada no histórico
-        await client.from('movimentacoes').insert([{
-          produto_id: prodId,
-          filial_id: filId,
-          tipo: 'entrada',
-          quantidade: qtdRecebida,
-          quantidade_anterior: antQtd,
-          quantidade_nova: novQtd,
-          usuario_id: usrId,
-          motivo: `Recebimento do Pedido de Compra #${id}`,
-          created_at: dataHora
-        }]);
-      }
-
       notificarRealtime('pedidos_compra', { id });
-      notificarRealtime('estoques', { filial_id: pedido.filial_id });
-      notificarRealtime('movimentacoes', { filial_id: pedido.filial_id });
-      return { ...pedido, status: 'recebido', recebido_at: dataHora };
+      return data;
     }
     return apiRequest(`/pedidos/${id}/receber`, { method: 'POST' });
   },

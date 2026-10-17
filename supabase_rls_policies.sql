@@ -237,21 +237,12 @@ FOR INSERT WITH CHECK (
   origem_id = public.get_auth_user_filial_id()
 );
 
-CREATE POLICY "Atualizacao Transferencias por Perfil" ON public.transferencias
-FOR UPDATE USING (
-  public.get_auth_user_cargo() = 'gerente' OR
-  destino_id = public.get_auth_user_filial_id()
-) WITH CHECK (
-  (public.get_auth_user_cargo() = 'gerente' OR destino_id = public.get_auth_user_filial_id()) AND
-  status IN ('pendente', 'concluida')
-);
-
 GRANT SELECT, INSERT ON public.transferencias TO authenticated;
+-- Bloquear UPDATE direto na tabela transferencias (Conclusão DEVE obrigatoriamente usar concluir_transferencia_rpc)
 REVOKE UPDATE ON public.transferencias FROM PUBLIC, anon, authenticated;
-REVOKE UPDATE (id, origem_id, destino_id, produto_id, usuario_id, quantidade, created_at) ON public.transferencias FROM PUBLIC, anon, authenticated;
-GRANT UPDATE (status, observacao, concluida_at) ON public.transferencias TO authenticated;
 
--- RPC Transacional Atômico para Conclusão de Transferência (Bloqueio de linha FOR UPDATE, rollback automático em falhas e idempotência)
+-- RPC Transacional Atômico para Conclusão de Transferência
+-- Valida saldo de origem com SELECT FOR UPDATE, calcula quantidades reais anteriores/posteriores, garante idempotência e rollback integral.
 CREATE OR REPLACE FUNCTION public.concluir_transferencia_rpc(
   p_transferencia_id bigint,
   p_observacao text DEFAULT NULL
@@ -267,6 +258,10 @@ DECLARE
   v_user_id bigint;
   v_user_cargo text;
   v_user_filial_id bigint;
+  v_origem_qtd_ant integer;
+  v_origem_qtd_nova integer;
+  v_dest_qtd_ant integer;
+  v_dest_qtd_nova integer;
 BEGIN
   v_user_email := (auth.jwt() ->> 'email');
   IF v_user_email IS NULL THEN
@@ -282,6 +277,7 @@ BEGIN
     RAISE EXCEPTION 'Acesso negado: Conta invalida ou inativa.';
   END IF;
 
+  -- 1. Bloquear linha da transferencia com SELECT FOR UPDATE
   SELECT * INTO v_transf
   FROM public.transferencias
   WHERE id = p_transferencia_id
@@ -299,26 +295,58 @@ BEGIN
     RAISE EXCEPTION 'Operacao negada: Transferencia ID % possui status invalido (%) para conclusao.', p_transferencia_id, v_transf.status;
   END IF;
 
+  IF v_transf.quantidade <= 0 THEN
+    RAISE EXCEPTION 'Operacao negada: Quantidade da transferencia invalida (%).', v_transf.quantidade;
+  END IF;
+
   IF v_user_cargo != 'gerente' AND v_user_filial_id != v_transf.destino_id THEN
     RAISE EXCEPTION 'Acesso negado: Somente gerentes ou funcionarios da filial de destino podem concluir a transferencia.';
   END IF;
 
+  -- 2. Validar e bloquear estoque da origem (SELECT FOR UPDATE)
+  SELECT quantidade INTO v_origem_qtd_ant
+  FROM public.estoques
+  WHERE filial_id = v_transf.origem_id AND produto_id = v_transf.produto_id
+  FOR UPDATE;
+
+  IF v_origem_qtd_ant IS NULL THEN
+    RAISE EXCEPTION 'Estoque de origem nao encontrado para a filial % e produto %.', v_transf.origem_id, v_transf.produto_id;
+  END IF;
+
+  IF v_origem_qtd_ant < v_transf.quantidade THEN
+    RAISE EXCEPTION 'Saldo insuficiente em estoque na filial de origem. Saldo atual: %, Solicitado: %.', v_origem_qtd_ant, v_transf.quantidade;
+  END IF;
+
+  v_origem_qtd_nova := v_origem_qtd_ant - v_transf.quantidade;
+
+  -- 3. Bloquear e calcular estoque do destino
+  SELECT COALESCE(
+    (SELECT quantidade FROM public.estoques WHERE filial_id = v_transf.destino_id AND produto_id = v_transf.produto_id FOR UPDATE),
+    0
+  ) INTO v_dest_qtd_ant;
+
+  v_dest_qtd_nova := v_dest_qtd_ant + v_transf.quantidade;
+
+  -- 4. Atualizar estoque da origem
   UPDATE public.estoques
-  SET quantidade = quantidade - v_transf.quantidade, updated_at = now()
+  SET quantidade = v_origem_qtd_nova, updated_at = now()
   WHERE filial_id = v_transf.origem_id AND produto_id = v_transf.produto_id;
 
+  -- 5. Atualizar/Inserir estoque do destino
   INSERT INTO public.estoques (filial_id, produto_id, quantidade, status, updated_at)
   VALUES (v_transf.destino_id, v_transf.produto_id, v_transf.quantidade, 'Disponivel', now())
   ON CONFLICT (filial_id, produto_id) DO UPDATE
   SET quantidade = public.estoques.quantidade + EXCLUDED.quantidade,
       updated_at = now();
 
+  -- 6. Registrar movimentações auditáveis com saldos anteriores e posteriores REAIS
   INSERT INTO public.movimentacoes (produto_id, filial_id, usuario_id, tipo, quantidade, quantidade_anterior, quantidade_nova, motivo, created_at)
-  VALUES (v_transf.produto_id, v_transf.origem_id, v_user_id, 'saida', v_transf.quantidade, 0, 0, COALESCE(p_observacao, 'Transferencia Concluida (Saida Origem)'), now());
+  VALUES (v_transf.produto_id, v_transf.origem_id, v_user_id, 'saida', v_transf.quantidade, v_origem_qtd_ant, v_origem_qtd_nova, COALESCE(p_observacao, 'Transferencia Concluida (Saida Origem)'), now());
 
   INSERT INTO public.movimentacoes (produto_id, filial_id, usuario_id, tipo, quantidade, quantidade_anterior, quantidade_nova, motivo, created_at)
-  VALUES (v_transf.produto_id, v_transf.destino_id, v_user_id, 'entrada', v_transf.quantidade, 0, 0, COALESCE(p_observacao, 'Transferencia Concluida (Entrada Destino)'), now());
+  VALUES (v_transf.produto_id, v_transf.destino_id, v_user_id, 'entrada', v_transf.quantidade, v_dest_qtd_ant, v_dest_qtd_nova, COALESCE(p_observacao, 'Transferencia Concluida (Entrada Destino)'), now());
 
+  -- 7. Marcar transferencia como concluida
   UPDATE public.transferencias
   SET status = 'concluida',
       observacao = COALESCE(p_observacao, observacao),
@@ -344,19 +372,9 @@ FOR INSERT WITH CHECK (
   public.get_auth_user_cargo() = 'gerente'
 );
 
-CREATE POLICY "Atualizacao Pedidos Compra por Perfil" ON public.pedidos_compra
-FOR UPDATE USING (
-  public.get_auth_user_cargo() = 'gerente' OR
-  filial_id = public.get_auth_user_filial_id()
-) WITH CHECK (
-  (public.get_auth_user_cargo() = 'gerente' OR filial_id = public.get_auth_user_filial_id()) AND
-  status IN ('aberto', 'recebido')
-);
-
 GRANT SELECT, INSERT ON public.pedidos_compra TO authenticated;
+-- Bloquear UPDATE direto na tabela pedidos_compra (Recebimento DEVE obrigatoriamente usar receber_pedido_rpc)
 REVOKE UPDATE ON public.pedidos_compra FROM PUBLIC, anon, authenticated;
-REVOKE UPDATE (id, filial_id, usuario_id, created_at) ON public.pedidos_compra FROM PUBLIC, anon, authenticated;
-GRANT UPDATE (status, observacao, recebido_at) ON public.pedidos_compra TO authenticated;
 
 CREATE POLICY "Leitura Itens Pedido Compra por Perfil" ON public.itens_pedido_compra
 FOR SELECT USING (
@@ -375,7 +393,8 @@ FOR INSERT WITH CHECK (
 
 GRANT SELECT, INSERT ON public.itens_pedido_compra TO authenticated;
 
--- RPC Transacional Atômico para Recebimento de Pedido de Compra (Bloqueio de linha FOR UPDATE, rollback automático e idempotência)
+-- RPC Transacional Atômico para Recebimento de Pedido de Compra
+-- Rejeita pedidos sem itens, valida quantidades/produtos, calcula saldos anteriores/posteriores reais, garante rollback e idempotência.
 CREATE OR REPLACE FUNCTION public.receber_pedido_rpc(
   p_pedido_id bigint,
   p_observacao text DEFAULT NULL
@@ -392,6 +411,9 @@ DECLARE
   v_user_id bigint;
   v_user_cargo text;
   v_user_filial_id bigint;
+  v_items_count integer;
+  v_dest_qtd_ant integer;
+  v_dest_qtd_nova integer;
 BEGIN
   v_user_email := (auth.jwt() ->> 'email');
   IF v_user_email IS NULL THEN
@@ -407,6 +429,7 @@ BEGIN
     RAISE EXCEPTION 'Acesso negado: Conta invalida ou inativa.';
   END IF;
 
+  -- 1. Bloquear linha do pedido com SELECT FOR UPDATE
   SELECT * INTO v_pedido
   FROM public.pedidos_compra
   WHERE id = p_pedido_id
@@ -428,19 +451,44 @@ BEGIN
     RAISE EXCEPTION 'Acesso negado: Usuario nao pertence a filial responsável pelo pedido.';
   END IF;
 
+  -- 2. Validar existencia de itens no pedido
+  SELECT count(*) INTO v_items_count
+  FROM public.itens_pedido_compra
+  WHERE pedido_id = p_pedido_id;
+
+  IF v_items_count = 0 THEN
+    RAISE EXCEPTION 'Operacao negada: Pedido de compra ID % nao possui itens vinculados.', p_pedido_id;
+  END IF;
+
+  -- 3. Processar cada item
   FOR v_item IN
     SELECT * FROM public.itens_pedido_compra WHERE pedido_id = p_pedido_id
   LOOP
+    IF v_item.quantidade <= 0 THEN
+      RAISE EXCEPTION 'Operacao negada: Item ID % possui quantidade invalida (%).', v_item.id, v_item.quantidade;
+    END IF;
+
+    -- Obter e bloquear estoque anterior
+    SELECT COALESCE(
+      (SELECT quantidade FROM public.estoques WHERE filial_id = v_pedido.filial_id AND produto_id = v_item.produto_id FOR UPDATE),
+      0
+    ) INTO v_dest_qtd_ant;
+
+    v_dest_qtd_nova := v_dest_qtd_ant + v_item.quantidade;
+
+    -- Incrementar estoque
     INSERT INTO public.estoques (filial_id, produto_id, quantidade, status, updated_at)
     VALUES (v_pedido.filial_id, v_item.produto_id, v_item.quantidade, 'Disponivel', now())
     ON CONFLICT (filial_id, produto_id) DO UPDATE
     SET quantidade = public.estoques.quantidade + EXCLUDED.quantidade,
         updated_at = now();
 
+    -- Registrar movimentação auditável com saldos anteriores e posteriores REAIS
     INSERT INTO public.movimentacoes (produto_id, filial_id, usuario_id, tipo, quantidade, quantidade_anterior, quantidade_nova, motivo, created_at)
-    VALUES (v_item.produto_id, v_pedido.filial_id, v_user_id, 'entrada', v_item.quantidade, 0, 0, COALESCE(p_observacao, 'Recebimento de Pedido de Compra'), now());
+    VALUES (v_item.produto_id, v_pedido.filial_id, v_user_id, 'entrada', v_item.quantidade, v_dest_qtd_ant, v_dest_qtd_nova, COALESCE(p_observacao, 'Recebimento de Pedido de Compra'), now());
   END LOOP;
 
+  -- 4. Marcar pedido como recebido
   UPDATE public.pedidos_compra
   SET status = 'recebido',
       observacao = COALESCE(p_observacao, observacao),

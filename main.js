@@ -34,6 +34,19 @@ if (typeof window !== 'undefined') {
 }
 
 /**
+ * Sanitização contra injeção de scripts (XSS) ao inserir texto dinâmico no DOM via innerHTML
+ */
+function escapeHtml(str) {
+  if (str === null || str === undefined) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+/**
  * Teste simples de conexão autorizada com o Supabase
  * Realiza uma consulta de leitura na tabela pública 'filiais' sem modificar dados.
  */
@@ -59,14 +72,14 @@ if (typeof window !== 'undefined') {
   window.supabaseClient = supabaseClient;
   window.initSupabase = initSupabase;
   window.testarConexaoSupabase = testarConexaoSupabase;
+  window.escapeHtml = escapeHtml;
 }
 
 // ---------- CONFIGURAÇÃO DA API E BASE DADOS DEMO/STATIC ----------
 const IS_LOCAL = false;
 const API_BASE_URL = '';
 
-
-// Fallback de dados estáticos para simulação completa no GitHub Pages quando backend Java não estiver exposto publicamente
+// Fallback de dados estáticos para simulação completa quando backend não estiver exposto publicamente
 let mockFiliais = [
   { id: 1, nome: 'Filial Centro' },
   { id: 2, nome: 'Filial Norte' },
@@ -81,7 +94,7 @@ let mockTransferencias = [];
 let mockPedidos = [];
 let mockMovimentacoes = [];
 
-// Wrapper único de fetch: centraliza headers, tratamento de erro, JSON e fallback local para GitHub Pages.
+// Wrapper único de fetch: centraliza headers, tratamento de erro, JSON e fallback local.
 async function apiRequest(path, options = {}) {
   let res;
   try {
@@ -90,7 +103,6 @@ async function apiRequest(path, options = {}) {
       ...options
     });
   } catch (err) {
-    // Caso esteja rodando sem o backend Java ativo (ex: GitHub Pages puro sem servidor), executa fallback funcional
     return resolverMockLocal(path, options);
   }
 
@@ -308,15 +320,21 @@ const api = {
     if (!dados.nome || !dados.sku) {
       throw new Error('Nome e SKU do produto são obrigatórios.');
     }
+    if (!Number.isInteger(dados.qtd_minima) || dados.qtd_minima < 0) {
+      throw new Error('A quantidade mínima deve ser um número inteiro maior ou igual a zero.');
+    }
 
     const client = getSupabaseClient();
     if (client) {
-      // Verificar se o novo SKU já é utilizado por outro produto
-      const { data: existingSkus } = await client
+      const { data: existingSkus, error: skuErr } = await client
         .from('produtos')
         .select('id, codigo')
         .eq('codigo', dados.sku)
         .neq('id', id);
+
+      if (skuErr) {
+        throw new Error(skuErr.message || 'Erro ao verificar duplicidade de SKU.');
+      }
 
       if (existingSkus && existingSkus.length > 0) {
         throw new Error(`O SKU '${dados.sku}' já está em uso por outro produto.`);
@@ -326,7 +344,7 @@ const api = {
         nome: dados.nome,
         codigo: dados.sku,
         descricao: dados.categoria || 'Geral',
-        qtd_minima: dados.qtd_minima || 0
+        qtd_minima: dados.qtd_minima
       };
 
       const { data, error } = await client
@@ -369,14 +387,23 @@ const api = {
   },
 
   criarProduto: async (dados) => {
+    if (!dados.nome || !dados.sku) {
+      throw new Error('Preencha Nome e SKU do produto.');
+    }
+    if (!Number.isInteger(dados.qtd_minima) || dados.qtd_minima < 0) {
+      throw new Error('A quantidade mínima deve ser um inteiro válido maior ou igual a zero.');
+    }
+
     const client = getSupabaseClient();
     if (client) {
-      // 1. Determinar SKU exclusivo tratando duplicidades (base, base-1, base-2...)
       const skuBase = dados.sku || obterSkuPorNome(dados.nome);
       let codigoFinal = skuBase;
 
-      // Buscar códigos existentes na tabela produtos
-      const { data: prodsExistentes } = await client.from('produtos').select('codigo');
+      const { data: prodsExistentes, error: pExistErr } = await client.from('produtos').select('codigo');
+      if (pExistErr) {
+        throw new Error(pExistErr.message || 'Erro ao verificar códigos de produto existentes.');
+      }
+
       if (prodsExistentes && prodsExistentes.length > 0) {
         const codigosEmUso = new Set(prodsExistentes.map(p => p.codigo));
         if (codigosEmUso.has(skuBase)) {
@@ -392,7 +419,7 @@ const api = {
         nome: dados.nome,
         codigo: codigoFinal,
         descricao: dados.categoria || 'Geral',
-        qtd_minima: dados.qtd_minima || 10,
+        qtd_minima: dados.qtd_minima ?? 10,
         unidade_medida: 'unidade',
         ativo: true
       };
@@ -417,7 +444,10 @@ const api = {
           quantidade: initialQtd,
           status: st
         };
-        await client.from('estoques').insert([estoqueRecord]);
+        const { error: estErr } = await client.from('estoques').insert([estoqueRecord]);
+        if (estErr) {
+          console.warn('Não foi possível inserir estoque inicial para o novo produto:', estErr.message);
+        }
 
         notificarRealtime('produtos', { id: prodId });
         notificarRealtime('estoques', { produto_id: prodId, filial_id: targetFilialId });
@@ -426,7 +456,7 @@ const api = {
           sku: codigoFinal,
           nome: dados.nome,
           categoria: dados.categoria || 'Geral',
-          qtd_minima: dados.qtd_minima || 10,
+          qtd_minima: dados.qtd_minima ?? 10,
           filial_id: targetFilialId
         };
       }
@@ -454,39 +484,54 @@ const api = {
     if (usuario && usuario.tipo === 'funcionario' && usuario.filial_id && dados.filialId != usuario.filial_id) {
       throw new Error('Acesso negado: Funcionário só pode alterar o estoque da sua própria filial.');
     }
+    if (!Number.isInteger(dados.quantidade) || dados.quantidade <= 0) {
+      throw new Error('A quantidade de ajuste deve ser um número inteiro maior que zero.');
+    }
+
     const client = getSupabaseClient();
     if (client) {
-      // Buscar registro atual de estoque
-      const { data: currentStock } = await client
+      const { data: currentStock, error: cErr } = await client
         .from('estoques')
         .select('*')
         .eq('produto_id', dados.produtoId)
         .eq('filial_id', dados.filialId)
-        .single();
+        .maybeSingle();
+
+      if (cErr) {
+        throw new Error(cErr.message || 'Erro ao consultar estoque atual.');
+      }
 
       const anterior = currentStock ? currentStock.quantidade : 0;
+      if (dados.tipo === 'saida' && anterior < dados.quantidade) {
+        throw new Error(`Saldo insuficiente na filial para realizar a saída (disponível: ${anterior}, solicitado: ${dados.quantidade}).`);
+      }
+
       const novaQtd = dados.tipo === 'entrada'
         ? anterior + dados.quantidade
         : Math.max(0, anterior - dados.quantidade);
 
-      // Buscar produto para verificar quantidade mínima
-      const { data: prd } = await client.from('produtos').select('*').eq('id', dados.produtoId).single();
+      const { data: prd, error: prdErr } = await client.from('produtos').select('*').eq('id', dados.produtoId).single();
+      if (prdErr) {
+        throw new Error(prdErr.message || 'Produto não encontrado para ajuste.');
+      }
+
       const minQtd = prd ? (prd.qtd_minima || 0) : 0;
       const st = novaQtd === 0 ? 'zerado' : (novaQtd <= minQtd ? 'baixo' : 'suficiente');
 
       if (currentStock) {
-        await client
+        const { error: updErr } = await client
           .from('estoques')
           .update({ quantidade: novaQtd, status: st, updated_at: new Date().toISOString() })
           .eq('id', currentStock.id);
+        if (updErr) throw new Error(updErr.message || 'Erro ao atualizar registro de estoque.');
       } else {
-        await client
+        const { error: insErr } = await client
           .from('estoques')
           .insert([{ produto_id: dados.produtoId, filial_id: dados.filialId, quantidade: novaQtd, status: st }]);
+        if (insErr) throw new Error(insErr.message || 'Erro ao criar registro de estoque.');
       }
 
-      // Registrar auditoria em movimentacoes
-      await client.from('movimentacoes').insert([{
+      const { error: movErr } = await client.from('movimentacoes').insert([{
         produto_id: dados.produtoId,
         filial_id: dados.filialId,
         tipo: dados.tipo,
@@ -497,6 +542,10 @@ const api = {
         motivo: dados.motivo || 'Ajuste manual',
         created_at: new Date().toISOString()
       }]);
+
+      if (movErr) {
+        console.warn('Erro ao registrar histórico de movimentação:', movErr.message);
+      }
 
       notificarRealtime('estoques', { produto_id: dados.produtoId, filial_id: dados.filialId });
       notificarRealtime('movimentacoes', { produto_id: dados.produtoId, filial_id: dados.filialId });
@@ -515,11 +564,8 @@ const api = {
         const { data: fils } = await client.from('filiais').select('id, nome');
         let usrs = null;
         const { data: usrsData, error: uErr } = await client.from('usuarios').select('id, nome');
-        if (!uErr && usrsData) {
-          usrs = usrsData;
-        } else {
-          usrs = null;
-        }
+        if (!uErr && usrsData) usrs = usrsData;
+
         let listT = data;
         if (usuario && usuario.tipo === 'funcionario' && usuario.filial_id) {
           listT = listT.filter(t => (t.origem_id == usuario.filial_id || t.origem_filial_id == usuario.filial_id || t.destino_id == usuario.filial_id || t.destino_filial_id == usuario.filial_id));
@@ -546,8 +592,8 @@ const api = {
     if (usuario && usuario.tipo === 'funcionario' && usuario.filial_id && dados.origemId != usuario.filial_id) {
       throw new Error('Acesso negado: Funcionário só pode solicitar transferência tendo sua filial como origem.');
     }
-    if (!dados.quantidade || dados.quantidade <= 0) {
-      throw new Error('Informe uma quantidade válida para a transferência.');
+    if (!Number.isInteger(dados.quantidade) || dados.quantidade <= 0) {
+      throw new Error('Informe uma quantidade inteira válida maior que zero para a transferência.');
     }
     if (dados.origemId === dados.destinoId) {
       throw new Error('Filial de Origem e Destino devem ser diferentes.');
@@ -555,17 +601,20 @@ const api = {
 
     const client = getSupabaseClient();
     if (client) {
-      // 1. Validar produto e estoque de origem
-      const { data: origEst } = await client
+      const { data: origEst, error: origErr } = await client
         .from('estoques')
         .select('*')
         .eq('produto_id', dados.produtoId)
         .eq('filial_id', dados.origemId)
-        .single();
+        .maybeSingle();
+
+      if (origErr) {
+        throw new Error(origErr.message || 'Erro ao verificar estoque da filial de origem.');
+      }
 
       const estoqueDisponivel = origEst ? origEst.quantidade : 0;
       if (estoqueDisponivel < dados.quantidade) {
-        throw new Error(`Estoque insuficiente na filial de origem (disponível: ${estoqueDisponivel}).`);
+        throw new Error(`Estoque insuficiente na filial de origem (disponível: ${estoqueDisponivel}, solicitado: ${dados.quantidade}).`);
       }
 
       const payload = {
@@ -574,7 +623,7 @@ const api = {
         destino_id: dados.destinoId,
         quantidade: dados.quantidade,
         usuario_id: usuario ? usuario.id : null,
-        status: 'solicitada',
+        status: 'pendente',
         created_at: new Date().toISOString()
       };
       const { data, error } = await client.from('transferencias').insert([payload]).select().single();
@@ -588,7 +637,7 @@ const api = {
           quantidade: data.quantidade,
           solicitante: usuario ? usuario.nome : 'Solicitante',
           data: new Date().toLocaleDateString('pt-BR'),
-          status: 'solicitada'
+          status: 'pendente'
         };
       } else if (error) {
         throw new Error(error.message || 'Erro ao criar transferência no Supabase.');
@@ -603,6 +652,10 @@ const api = {
       const { data, error } = await client.rpc('concluir_transferencia_rpc', { p_transferencia_id: id });
       if (error) {
         throw new Error(error.message || 'Erro ao concluir transferência.');
+      }
+      if (!data || data.success !== true) {
+        const msg = (data && data.message) ? data.message : 'A operação de transferência não pôde ser concluída pelo banco de dados.';
+        throw new Error(msg);
       }
       notificarRealtime('transferencias', { id });
       return data;
@@ -620,11 +673,7 @@ const api = {
         const { data: fils } = await client.from('filiais').select('id, nome');
         let usrs = null;
         const { data: usrsData, error: uErr } = await client.from('usuarios').select('id, nome');
-        if (!uErr && usrsData) {
-          usrs = usrsData;
-        } else {
-          usrs = null;
-        }
+        if (!uErr && usrsData) usrs = usrsData;
 
         return pedidosData.map(p => {
           const itensDoPedido = itensData ? itensData.filter(i => String(i.pedido_id) === String(p.id)) : [];
@@ -660,13 +709,12 @@ const api = {
     if (usuario && usuario.tipo !== 'gerente') {
       throw new Error('Apenas gerentes possuem permissão para criar pedidos.');
     }
-    if (!dados.produtoId || !dados.filialId || !dados.quantidade || dados.quantidade <= 0) {
-      throw new Error('Informe um produto, filial e quantidade válida maior que zero.');
+    if (!dados.produtoId || !dados.filialId || !Number.isInteger(dados.quantidade) || dados.quantidade <= 0) {
+      throw new Error('Informe um produto, filial e uma quantidade inteira maior que zero.');
     }
 
     const client = getSupabaseClient();
     if (client) {
-      // 1. Inserir o registro pai na tabela pedidos_compra
       const payloadPedido = {
         filial_id: dados.filialId,
         usuario_id: usuario ? usuario.id : null,
@@ -684,7 +732,6 @@ const api = {
         throw new Error(pErr?.message || 'Erro ao criar registro do pedido de compra.');
       }
 
-      // 2. Inserir os itens do pedido na tabela itens_pedido_compra
       const payloadItem = {
         pedido_id: pedido.id,
         produto_id: dados.produtoId,
@@ -698,7 +745,6 @@ const api = {
         .single();
 
       if (iErr) {
-        // Rollback: se a gravação do item falhar, excluir o pedido pai para evitar pedido incompleto
         await client.from('pedidos_compra').delete().eq('id', pedido.id);
         throw new Error(iErr.message || 'Erro ao gravar os itens do pedido de compra.');
       }
@@ -725,6 +771,10 @@ const api = {
       const { data, error } = await client.rpc('receber_pedido_rpc', { p_pedido_id: id });
       if (error) {
         throw new Error(error.message || 'Erro ao receber pedido de compra.');
+      }
+      if (!data || data.success !== true) {
+        const msg = (data && data.message) ? data.message : 'A operação de recebimento de pedido não pôde ser concluída pelo banco de dados.';
+        throw new Error(msg);
       }
       notificarRealtime('pedidos_compra', { id });
       return data;
@@ -781,11 +831,7 @@ const api = {
         const { data: fils } = await client.from('filiais').select('id, nome');
         let usrs = null;
         const { data: usrsData, error: uErr } = await client.from('usuarios').select('id, nome');
-        if (!uErr && usrsData) {
-          usrs = usrsData;
-        } else {
-          usrs = null;
-        }
+        if (!uErr && usrsData) usrs = usrsData;
 
         return data.map(m => {
           const usrEncontrado = usrs?.find(u => String(u.id) === String(m.usuario_id));
@@ -861,14 +907,12 @@ const api = {
           ? (listT ? listT.filter(t => (String(t.origem_id) === String(usuario.filial_id) || String(t.destino_id) === String(usuario.filial_id)) && (t.status === 'solicitada' || t.status === 'pendente')) : [])
           : (listT ? listT.filter(t => t.status === 'solicitada' || t.status === 'pendente') : []);
 
-        // Consultar movimentações dos últimos 7 dias no Supabase
         const diasSemana = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
         const hoje = new Date();
         const labelsSemana = [];
         const entradasSemana = [0, 0, 0, 0, 0, 0, 0];
         const saidasSemana = [0, 0, 0, 0, 0, 0, 0];
 
-        // Montar os últimos 7 dias em ordem cronológica
         const diasDatas = [];
         for (let i = 6; i >= 0; i--) {
           const d = new Date(hoje);
@@ -921,7 +965,7 @@ const api = {
   },
 };
 
-// ---------- ESTADO LOCAL (apenas cache do que veio da API) ----------
+// ---------- ESTADO LOCAL ----------
 let usuario = null;
 let FILIAIS = [];
 let produtos = [];
@@ -1011,14 +1055,16 @@ function initTheme() {
   document.documentElement.setAttribute('data-theme', savedTheme);
   updateThemeUI(savedTheme);
 }
+
 function toggleTheme() {
   const currentTheme = document.documentElement.getAttribute('data-theme');
   const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
   document.documentElement.setAttribute('data-theme', newTheme);
   localStorage.setItem('theme', newTheme);
   updateThemeUI(newTheme);
-  if (document.getElementById('page-dashboard').classList.contains('active')) renderDashboard();
+  if (document.getElementById('page-dashboard')?.classList.contains('active')) renderDashboard();
 }
+
 function updateThemeUI(theme) {
   const icon = document.getElementById('theme-icon');
   const text = document.getElementById('theme-text');
@@ -1029,8 +1075,8 @@ function updateThemeUI(theme) {
   if (loginLogo) loginLogo.src = logoSrc;
   if (appLogo) appLogo.src = logoSrc;
 
-  if (theme === 'dark') { icon.innerHTML = ICON_SUN; text.textContent = 'Modo Claro'; }
-  else { icon.innerHTML = ICON_MOON; text.textContent = 'Modo Escuro'; }
+  if (theme === 'dark') { if (icon) icon.innerHTML = ICON_SUN; if (text) text.textContent = 'Modo Claro'; }
+  else { if (icon) icon.innerHTML = ICON_MOON; if (text) text.textContent = 'Modo Escuro'; }
 }
 initTheme();
 
@@ -1041,7 +1087,6 @@ const nomeProduto = id => produtos.find(p=>p.id===id)?.nome || '—';
 const skuProduto = id => produtos.find(p=>p.id===id)?.sku || '—';
 const minProduto = id => produtos.find(p=>p.id===id)?.qtd_minima || 0;
 
-// Se o backend já enviar o status pronto (recomendado), use e.status em vez desta função.
 function statusEstoque(qtd, min){
   if(qtd === 0) return 'zerado';
   if(qtd <= min) return 'baixo';
@@ -1060,6 +1105,7 @@ function toast(msg, erro=false){
 function getEstoque(pid, fid){
   return estoques.find(e=>e.produto_id===pid && e.filial_id===fid);
 }
+
 function filiaisVisiveis(){
   return usuario.tipo === 'gerente' ? FILIAIS : FILIAIS.filter(f=>f.id===usuario.filial_id);
 }
@@ -1070,6 +1116,10 @@ function mostrarLoading(el){
 
 // ---------- LOGIN ----------
 async function fazerLogin(){
+  const loginBtn = document.querySelector('#login-screen button');
+  if (loginBtn && loginBtn.disabled) return;
+  const originalText = loginBtn ? loginBtn.textContent : 'Entrar';
+
   const emailInput = $('login-email');
   const senhaInput = $('login-senha');
   const email = emailInput ? emailInput.value.trim() : '';
@@ -1077,13 +1127,14 @@ async function fazerLogin(){
 
   if(!email || !senha){ toast('E-mail e senha são obrigatórios.', true); return; }
 
+  if (loginBtn) { loginBtn.disabled = true; loginBtn.textContent = 'Entrando...'; }
+
   try {
     const client = getSupabaseClient();
     if (!client || !client.auth) {
       throw new Error('Erro de comunicação com o Supabase.');
     }
 
-    // Autenticação exclusiva via Supabase Auth (signInWithPassword)
     const { data: authData, error: authErr } = await client.auth.signInWithPassword({
       email: email,
       password: senha
@@ -1093,7 +1144,6 @@ async function fazerLogin(){
       throw new Error('Acesso negado. E-mail ou senha incorretos.');
     }
 
-    // Consulta do perfil do funcionário em public.usuarios (sem consultar ou validar campo senha)
     const { data: uData, error: uErr } = await client
       .from('usuarios')
       .select('id, nome, email, cargo, tipo, filial_id, ativo')
@@ -1124,10 +1174,11 @@ async function fazerLogin(){
     aplicarLogin(resposta);
   } catch (err) {
     toast(err.message || 'Acesso negado. Credenciais inválidas.', true);
+  } finally {
+    if (loginBtn) { loginBtn.disabled = false; loginBtn.textContent = originalText; }
   }
 }
 
-// Atalho para testar o layout sem o backend rodando ainda.
 function simularLogin(tipo){
   const nome = (tipo === 'gerente' ? 'Gerente' : 'Funcionário');
   aplicarLogin(tipo === 'gerente'
@@ -1144,7 +1195,6 @@ async function aplicarLogin(dadosUsuario){
     usuario.filial_id = usuario.filialId;
   }
 
-  // Persistir sessão do usuário no localStorage
   localStorage.setItem('lume_usuario', JSON.stringify(usuario));
 
   const loginScreen = $('login-screen');
@@ -1208,16 +1258,16 @@ async function verificarSessaoAtiva(){
   const client = getSupabaseClient();
   if (client && client.auth) {
     try {
-      const { data } = await client.auth.getSession();
-      if (data && data.session && data.session.user) {
+      const { data, error } = await client.auth.getSession();
+      if (!error && data && data.session && data.session.user) {
         const authUser = data.session.user;
-        const { data: uData } = await client
+        const { data: uData, error: uErr } = await client
           .from('usuarios')
-          .select('id, nome, email, cargo, tipo, filial_id')
+          .select('id, nome, email, cargo, tipo, filial_id, ativo')
           .ilike('email', authUser.email)
           .single();
 
-        if (uData) {
+        if (!uErr && uData && uData.ativo !== false) {
           const cargo = (uData.cargo || uData.tipo || 'funcionario').toLowerCase();
           aplicarLogin({
             id: uData.id,
@@ -1256,7 +1306,6 @@ async function carregarFiliais(){
   try {
     FILIAIS = await api.listarFiliais();
   } catch (err) {
-    // Fallback local apenas para o protótipo funcionar sem backend.
     FILIAIS = [
       {id:1, nome:'Filial Centro'}, {id:2, nome:'Filial Norte'}, {id:3, nome:'Filial Sul'},
       {id:4, nome:'Filial Leste'}, {id:5, nome:'Filial Oeste'}
@@ -1268,6 +1317,7 @@ async function carregarFiliais(){
 document.querySelectorAll('#menu a').forEach(a=>{
   a.addEventListener('click', ()=> irPara(a.dataset.page));
 });
+
 function irPara(page){
   document.querySelectorAll('#menu a').forEach(a=>a.classList.toggle('active', a.dataset.page===page));
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
@@ -1285,11 +1335,11 @@ function irPara(page){
 // ---------- FILTROS DE FILIAL ----------
 function montarFiltros(){
   const vis = filiaisVisiveis();
-  const dashHtml = vis.map(f=>`<button onclick="setFilialDash(${f.id},this)">${f.nome.replace('Filial ','')}</button>`).join('');
+  const dashHtml = vis.map(f=>`<button onclick="setFilialDash(${f.id},this)">${escapeHtml(f.nome.replace('Filial ',''))}</button>`).join('');
   const dashF = $('dash-filiais');
   if (dashF) dashF.innerHTML = `<button class="on" onclick="setFilialDash(null,this)">${usuario.tipo==='gerente'?'Todas':'Minha filial'}</button>` + dashHtml;
 
-  const estHtml = vis.map(f=>`<button onclick="setFilialEstoque(${f.id},this)">${f.nome.replace('Filial ','')}</button>`).join('');
+  const estHtml = vis.map(f=>`<button onclick="setFilialEstoque(${f.id},this)">${escapeHtml(f.nome.replace('Filial ',''))}</button>`).join('');
   const estF = $('estoque-filiais');
   if (estF) estF.innerHTML = `<button class="on" onclick="setFilialEstoque(null,this)">${usuario.tipo==='gerente'?'Todas':'Minha filial'}</button>` + estHtml;
 
@@ -1297,9 +1347,10 @@ function montarFiltros(){
   if (histF) {
     const showAllOpt = usuario && usuario.tipo === 'gerente';
     histF.innerHTML = (showAllOpt ? '<option value="">Todas as filiais</option>' : '') +
-      vis.map(f=>`<option value="${f.id}">${f.nome}</option>`).join('');
+      vis.map(f=>`<option value="${f.id}">${escapeHtml(f.nome)}</option>`).join('');
   }
 }
+
 function setFilialDash(id, btn){
   filialDashSel = id;
   const dashF = $('dash-filiais');
@@ -1307,6 +1358,7 @@ function setFilialDash(id, btn){
   if (btn) btn.classList.add('on');
   renderDashboard();
 }
+
 function setFilialEstoque(id, btn){
   filialEstoqueSel = id;
   const estF = $('estoque-filiais');
@@ -1318,7 +1370,6 @@ function setFilialEstoque(id, btn){
 // ---------- DASHBOARD ----------
 async function renderDashboard(){
   try {
-    // Ideal: o backend já devolve os KPIs calculados e os dados dos gráficos prontos.
     const dados = await api.resumoDashboard(filialDashSel);
     estoques = dados.estoques || [];
     produtos = dados.produtos || produtos;
@@ -1336,7 +1387,7 @@ function pintarKpis(dados){
   const kpis = $('dash-kpis');
   if (kpis) {
     kpis.innerHTML = `
-      <div class="card kpi"><span class="label">Itens em estoque</span><span class="value">${dados.totalItens ?? 0}</span><span class="badge info">${fid?nomeFilial(fid):'5 filiais'}</span></div>
+      <div class="card kpi"><span class="label">Itens em estoque</span><span class="value">${dados.totalItens ?? 0}</span><span class="badge info">${fid?escapeHtml(nomeFilial(fid)):'5 filiais'}</span></div>
       <div class="card kpi"><span class="label">Produtos cadastrados</span><span class="value">${dados.totalProdutos ?? produtos.length}</span><span class="badge ok">ativos</span></div>
       <div class="card kpi"><span class="label">Estoque baixo</span><span class="value" style="color:var(--warn-color)">${dados.totalBaixo ?? 0}</span><span class="badge warn">atenção</span></div>
       <div class="card kpi"><span class="label">Estoque zerado</span><span class="value" style="color:var(--danger-color)">${dados.totalZerado ?? 0}</span><span class="badge danger">urgente</span></div>
@@ -1350,7 +1401,7 @@ function pintarGraficos(dados){
   const gridColor = isDark ? '#2c2c3355' : '#e4e4e7';
   const roseColor = isDark ? '#c65b7e' : '#9d3b5c';
 
-  const porFilial = dados.estoquePorFilial || []; // [{nome, total}]
+  const porFilial = dados.estoquePorFilial || [];
   const canvasFilial = $('chart-estoque-filial');
   if(canvasFilial && typeof Chart !== 'undefined') {
     if(chartFilial) chartFilial.destroy();
@@ -1390,8 +1441,8 @@ function pintarAlertasDashboard(alertas){
           <tbody>
             ${alertas.map(e => `
               <tr>
-                <td><b>${e.produtoNome ?? nomeProduto(e.produto_id)}</b></td>
-                <td>${e.filialNome ?? nomeFilial(e.filial_id)}</td>
+                <td><b>${escapeHtml(e.produtoNome ?? nomeProduto(e.produto_id))}</b></td>
+                <td>${escapeHtml(e.filialNome ?? nomeFilial(e.filial_id))}</td>
                 <td>${e.quantidade}</td>
                 <td>${e.quantidadeMinima ?? minProduto(e.produto_id)}</td>
                 <td><span class="badge ${e.quantidade===0?'danger':'warn'}">${STATUS_LABEL[e.status ?? statusEstoque(e.quantidade, e.quantidadeMinima ?? minProduto(e.produto_id))]}</span></td>
@@ -1456,11 +1507,11 @@ function pintarProdutos(){
 
         html += `
           <tr class="${p.ativo === false ? 'row-inativo' : ''}">
-            <td><code>${p.sku}</code></td>
-            <td><b>${p.nome}</b></td>
-            <td>${p.categoria}</td>
+            <td><code>${escapeHtml(p.sku)}</code></td>
+            <td><b>${escapeHtml(p.nome)}</b></td>
+            <td>${escapeHtml(p.categoria)}</td>
             <td>${p.qtd_minima}</td>
-            <td>${nomeFilial(e.filial_id)}</td>
+            <td>${escapeHtml(nomeFilial(e.filial_id))}</td>
             <td>${e.quantidade}</td>
             <td>${statusBadge}</td>
             <td>${acoesHtml}</td>
@@ -1494,16 +1545,26 @@ function abrirModalEditarProduto(id) {
 }
 
 async function salvarEdicaoProduto() {
+  const saveBtn = document.querySelector('#modal-editar-produto button.btn-primary');
+  if (saveBtn && saveBtn.disabled) return;
+
   const id = parseInt($('ep-id').value);
   const nome = $('ep-nome').value.trim();
   const sku = $('ep-sku').value.trim();
   const categoria = $('ep-cat').value.trim();
-  const qtd_minima = parseInt($('ep-min').value) || 0;
+  const minRaw = $('ep-min').value;
+  const qtd_minima = parseInt(minRaw);
 
   if (!nome || !sku) {
     toast('Nome e SKU são obrigatórios.', true);
     return;
   }
+  if (!Number.isInteger(qtd_minima) || qtd_minima < 0) {
+    toast('Quantidade mínima deve ser um número inteiro válido maior ou igual a zero.', true);
+    return;
+  }
+
+  if (saveBtn) saveBtn.disabled = true;
 
   try {
     await api.editarProduto(id, { nome, sku, categoria, qtd_minima });
@@ -1512,6 +1573,8 @@ async function salvarEdicaoProduto() {
     renderProdutos();
   } catch (err) {
     toast(err.message || 'Não foi possível atualizar o produto.', true);
+  } finally {
+    if (saveBtn) saveBtn.disabled = false;
   }
 }
 
@@ -1527,6 +1590,7 @@ async function inativarPrd(id, btn) {
     return;
   }
 
+  if (btn && btn.disabled) return;
   if (btn) btn.disabled = true;
 
   try {
@@ -1535,9 +1599,11 @@ async function inativarPrd(id, btn) {
     renderProdutos();
   } catch (err) {
     toast(err.message || 'Não foi possível inativar o produto.', true);
+  } finally {
     if (btn) btn.disabled = false;
   }
 }
+
 const MAPA_SKU = {
   'Colar de prata': '01',
   'Colar de ouro': '02',
@@ -1568,12 +1634,12 @@ function atualizarSkuPorTipo() {
   }
 }
 
-function renderProdutosFiltro(){ pintarProdutos(); } // usado nos oninput/onchange da tela
+function renderProdutosFiltro(){ pintarProdutos(); }
 
 function abrirModalProduto(){
   const pf = $('p-filial');
   if (pf) {
-    pf.innerHTML = FILIAIS.map(f => `<option value="${f.id}">${f.nome}</option>`).join('');
+    pf.innerHTML = FILIAIS.map(f => `<option value="${f.id}">${escapeHtml(f.nome)}</option>`).join('');
     if (usuario && usuario.tipo === 'funcionario' && usuario.filial_id) {
       pf.value = usuario.filial_id;
       pf.disabled = true;
@@ -1591,14 +1657,21 @@ function abrirModalProduto(){
 }
 
 async function salvarProduto(){
+  const saveBtn = document.querySelector('#modal-produto button.btn-primary');
+  if (saveBtn && saveBtn.disabled) return;
+
   const nome = $('p-nome') ? $('p-nome').value.trim() : '';
   const sku = $('p-sku') ? $('p-sku').value.trim() : '';
   const categoria = $('p-cat') ? $('p-cat').value.trim() : '';
   const filialId = parseInt($('p-filial') ? $('p-filial').value : 0);
-  const qtd_minima = parseInt($('p-min') ? $('p-min').value : 10) || 10;
+  const minRaw = $('p-min') ? $('p-min').value : '10';
+  const qtd_minima = parseInt(minRaw);
 
   if(!nome || !sku){ toast('Preencha Nome e SKU.', true); return; }
   if(!filialId){ toast('Selecione uma filial obrigatória.', true); return; }
+  if(!Number.isInteger(qtd_minima) || qtd_minima < 0){ toast('Estoque mínimo deve ser um número inteiro válido.', true); return; }
+
+  if (saveBtn) saveBtn.disabled = true;
 
   try {
     await api.criarProduto({ nome, sku, categoria, filialId, qtd_minima });
@@ -1607,6 +1680,8 @@ async function salvarProduto(){
     renderProdutos();
   } catch (err) {
     toast(err.message || 'Não foi possível salvar o produto.', true);
+  } finally {
+    if (saveBtn) saveBtn.disabled = false;
   }
 }
 
@@ -1643,9 +1718,9 @@ function pintarEstoque(){
     const st = e.status ?? statusEstoque(e.quantidade, p.qtd_minima);
     return `
       <tr>
-        <td><code>${p.sku ?? '—'}</code></td>
-        <td><b>${p.nome ?? '—'}</b></td>
-        <td>${nomeFilial(e.filial_id)}</td>
+        <td><code>${escapeHtml(p.sku ?? '—')}</code></td>
+        <td><b>${escapeHtml(p.nome ?? '—')}</b></td>
+        <td>${escapeHtml(nomeFilial(e.filial_id))}</td>
         <td>${e.quantidade}</td>
         <td>${p.qtd_minima ?? '—'}</td>
         <td><span class="badge ${st==='zerado'?'danger':st==='baixo'?'warn':'ok'}">${STATUS_LABEL[st]}</span></td>
@@ -1670,11 +1745,20 @@ function abrirModalAjuste(pid, fid){
 }
 
 async function salvarAjuste(){
+  const saveBtn = document.querySelector('#modal-ajuste button.btn-primary');
+  if (saveBtn && saveBtn.disabled) return;
+
   const tipo = $('a-tipo') ? $('a-tipo').value : 'entrada';
-  const quantidade = parseInt($('a-qtd') ? $('a-qtd').value : 0) || 0;
+  const qtdRaw = $('a-qtd') ? $('a-qtd').value : '0';
+  const quantidade = parseInt(qtdRaw);
   const motivo = $('a-motivo') ? $('a-motivo').value.trim() : '';
 
-  if(quantidade <= 0){ toast('Informe uma quantidade válida.', true); return; }
+  if (!Number.isInteger(quantidade) || quantidade <= 0) {
+    toast('Informe uma quantidade inteira válida maior que zero.', true);
+    return;
+  }
+
+  if (saveBtn) saveBtn.disabled = true;
 
   try {
     await api.ajustarEstoque({
@@ -1689,6 +1773,8 @@ async function salvarAjuste(){
     irPara('estoque');
   } catch (err) {
     toast(err.message || 'Não foi possível ajustar o estoque.', true);
+  } finally {
+    if (saveBtn) saveBtn.disabled = false;
   }
 }
 
@@ -1727,13 +1813,13 @@ function pintarTransferencias(){
       return `
       <tr>
         <td>#${t.id}</td>
-        <td><b>${t.produtoNome ?? nomeProduto(t.produto_id)}</b></td>
-        <td>${t.origemNome ?? nomeFilial(t.origem_id)}</td>
-        <td>${t.destinoNome ?? nomeFilial(t.destino_id)}</td>
+        <td><b>${escapeHtml(t.produtoNome ?? nomeProduto(t.produto_id))}</b></td>
+        <td>${escapeHtml(t.origemNome ?? nomeFilial(t.origem_id))}</td>
+        <td>${escapeHtml(t.destinoNome ?? nomeFilial(t.destino_id))}</td>
         <td>${t.quantidade}</td>
-        <td>${t.solicitante}</td>
-        <td>${t.data}</td>
-        <td><span class="badge ${t.status==='concluida'?'ok':'info'}">${t.status}</span></td>
+        <td>${escapeHtml(t.solicitante)}</td>
+        <td>${escapeHtml(t.data)}</td>
+        <td><span class="badge ${t.status==='concluida'?'ok':'info'}">${escapeHtml(t.status)}</span></td>
         <td>${acaoHtml}</td>
       </tr>
     `}).join('');
@@ -1750,11 +1836,11 @@ async function abrirModalTransferencia(){
   if(produtosAtivos.length === 0){ toast('Nenhum produto ativo disponível para transferência.', true); return; }
 
   const tp = $('t-produto');
-  if (tp) tp.innerHTML = produtosAtivos.map(p=>`<option value="${p.id}">${p.nome}</option>`).join('');
+  if (tp) tp.innerHTML = produtosAtivos.map(p=>`<option value="${p.id}">${escapeHtml(p.nome)}</option>`).join('');
 
   const to = $('t-origem');
   if (to) {
-    to.innerHTML = FILIAIS.map(f=>`<option value="${f.id}">${f.nome}</option>`).join('');
+    to.innerHTML = FILIAIS.map(f=>`<option value="${f.id}">${escapeHtml(f.nome)}</option>`).join('');
     if (usuario && usuario.tipo === 'funcionario' && usuario.filial_id) {
       to.value = usuario.filial_id;
       to.disabled = true;
@@ -1764,7 +1850,7 @@ async function abrirModalTransferencia(){
   }
 
   const td = $('t-destino');
-  if (td) td.innerHTML = FILIAIS.map(f=>`<option value="${f.id}">${f.nome}</option>`).join('');
+  if (td) td.innerHTML = FILIAIS.map(f=>`<option value="${f.id}">${escapeHtml(f.nome)}</option>`).join('');
 
   const overlay = $('modal-overlay');
   const modalT = $('modal-transferencia');
@@ -1773,12 +1859,22 @@ async function abrirModalTransferencia(){
 }
 
 async function salvarTransferencia(){
+  const saveBtn = document.querySelector('#modal-transferencia button.btn-primary');
+  if (saveBtn && saveBtn.disabled) return;
+
   const produtoId = parseInt($('t-produto') ? $('t-produto').value : 0);
   const origemId = parseInt($('t-origem') ? $('t-origem').value : 0);
   const destinoId = parseInt($('t-destino') ? $('t-destino').value : 0);
-  const quantidade = parseInt($('t-qtd') ? $('t-qtd').value : 0) || 0;
+  const qtdRaw = $('t-qtd') ? $('t-qtd').value : '0';
+  const quantidade = parseInt(qtdRaw);
 
+  if(!Number.isInteger(quantidade) || quantidade <= 0){
+    toast('Informe uma quantidade inteira válida maior que zero.', true);
+    return;
+  }
   if(origemId === destinoId){ toast('Origem e Destino devem ser diferentes.', true); return; }
+
+  if (saveBtn) saveBtn.disabled = true;
 
   try {
     await api.criarTransferencia({ produtoId, origemId, destinoId, quantidade, solicitante: usuario ? usuario.nome : 'Usuário' });
@@ -1787,6 +1883,8 @@ async function salvarTransferencia(){
     renderTransferencias();
   } catch (err) {
     toast(err.message || 'Não foi possível solicitar a transferência.', true);
+  } finally {
+    if (saveBtn) saveBtn.disabled = false;
   }
 }
 
@@ -1797,11 +1895,16 @@ async function concluirTransf(id, btn){
     btn.textContent = 'Processando...';
   }
   try {
-    await api.concluirTransferencia(id);
-    toast('Transferência concluída com sucesso!');
-    renderTransferencias();
+    const res = await api.concluirTransferencia(id);
+    if (res && res.success === true) {
+      toast('Transferência concluída com sucesso!');
+      renderTransferencias();
+    } else {
+      throw new Error((res && res.message) ? res.message : 'Falha na conclusão da transferência.');
+    }
   } catch (err) {
     toast(err.message || 'Não foi possível concluir a transferência.', true);
+  } finally {
     if (btn) {
       btn.disabled = false;
       btn.textContent = 'Concluir';
@@ -1848,12 +1951,12 @@ function pintarPedidos(){
     return `
       <tr>
         <td>#${p.id}</td>
-        <td><b>${p.produtoNome ?? nomeProduto(p.produto_id)}</b></td>
+        <td><b>${escapeHtml(p.produtoNome ?? nomeProduto(p.produto_id))}</b></td>
         <td>${p.quantidade}</td>
-        <td>${p.filialNome ?? nomeFilial(p.filial_id)}</td>
-        <td>${p.solicitante}</td>
-        <td>${p.data}</td>
-        <td><span class="badge ${statusBadgeClass}">${p.status}</span></td>
+        <td>${escapeHtml(p.filialNome ?? nomeFilial(p.filial_id))}</td>
+        <td>${escapeHtml(p.solicitante)}</td>
+        <td>${escapeHtml(p.data)}</td>
+        <td><span class="badge ${statusBadgeClass}">${escapeHtml(p.status)}</span></td>
         <td>${acaoHtml}</td>
       </tr>
     `;
@@ -1867,11 +1970,16 @@ async function receberPedido(id, btn){
     btn.textContent = 'Processando...';
   }
   try {
-    await api.receberPedido(id);
-    toast('Pedido de compra marcado como recebido com sucesso!');
-    renderPedidos();
+    const res = await api.receberPedido(id);
+    if (res && res.success === true) {
+      toast('Pedido de compra marcado como recebido com sucesso!');
+      renderPedidos();
+    } else {
+      throw new Error((res && res.message) ? res.message : 'Falha ao receber pedido de compra.');
+    }
   } catch (err) {
     toast(err.message || 'Não foi possível receber o pedido de compra.', true);
+  } finally {
     if (btn) {
       btn.disabled = false;
       btn.textContent = 'Marcar como Recebido';
@@ -1895,10 +2003,10 @@ async function abrirModalPedido(){
   if(produtosAtivos.length === 0){ toast('Nenhum produto ativo disponível para criação de pedidos.', true); return; }
 
   const pcp = $('pc-produto');
-  if (pcp) pcp.innerHTML = produtosAtivos.map(p=>`<option value="${p.id}">${p.nome}</option>`).join('');
+  if (pcp) pcp.innerHTML = produtosAtivos.map(p=>`<option value="${p.id}">${escapeHtml(p.nome)}</option>`).join('');
 
   const pcf = $('pc-filial');
-  if (pcf) pcf.innerHTML = FILIAIS.map(f=>`<option value="${f.id}">${f.nome}</option>`).join('');
+  if (pcf) pcf.innerHTML = FILIAIS.map(f=>`<option value="${f.id}">${escapeHtml(f.nome)}</option>`).join('');
 
   const overlay = $('modal-overlay');
   const modalP = $('modal-pedido');
@@ -1912,14 +2020,20 @@ async function salvarPedido(){
     return;
   }
 
+  const saveBtn = document.querySelector('#modal-pedido button.btn-primary');
+  if (saveBtn && saveBtn.disabled) return;
+
   const produtoId = parseInt($('pc-produto') ? $('pc-produto').value : 0);
   const filialId = parseInt($('pc-filial') ? $('pc-filial').value : 0);
-  const quantidade = parseInt($('pc-qtd') ? $('pc-qtd').value : 0) || 0;
+  const qtdRaw = $('pc-qtd') ? $('pc-qtd').value : '0';
+  const quantidade = parseInt(qtdRaw);
 
-  if (!produtoId || !filialId || quantidade <= 0) {
-    toast('Selecione o produto, a filial e uma quantidade válida maior que zero.', true);
+  if (!produtoId || !filialId || !Number.isInteger(quantidade) || quantidade <= 0) {
+    toast('Selecione o produto, a filial e uma quantidade inteira maior que zero.', true);
     return;
   }
+
+  if (saveBtn) saveBtn.disabled = true;
 
   try {
     await api.criarPedido({ produtoId, filialId, quantidade, solicitante: usuario ? usuario.nome : 'Gerente' });
@@ -1928,6 +2042,8 @@ async function salvarPedido(){
     renderPedidos();
   } catch (err) {
     toast(err.message || 'Não foi possível criar o pedido.', true);
+  } finally {
+    if (saveBtn) saveBtn.disabled = false;
   }
 }
 
@@ -1936,7 +2052,6 @@ async function renderAlertas(){
   mostrarLoading($('tbody-alertas'));
   try {
     const dados = await api.listarAlertas();
-    // Espera-se { totalBaixo, totalZerado, itens: [...] }
     const kpis = $('alertas-kpis');
     if (kpis) {
       kpis.innerHTML = `
@@ -1951,9 +2066,9 @@ async function renderAlertas(){
         ? '<tr><td colspan="7" class="empty-state">Nenhum alerta no momento.</td></tr>'
         : itens.map(e => `
           <tr>
-            <td><code>${e.sku ?? skuProduto(e.produto_id)}</code></td>
-            <td><b>${e.produtoNome ?? nomeProduto(e.produto_id)}</b></td>
-            <td>${e.filialNome ?? nomeFilial(e.filial_id)}</td>
+            <td><code>${escapeHtml(e.sku ?? skuProduto(e.produto_id))}</code></td>
+            <td><b>${escapeHtml(e.produtoNome ?? nomeProduto(e.produto_id))}</b></td>
+            <td>${escapeHtml(e.filialNome ?? nomeFilial(e.filial_id))}</td>
             <td>${e.quantidade}</td>
             <td>${e.quantidadeMinima ?? minProduto(e.produto_id)}</td>
             <td><span class="badge ${e.status==='zerado'?'danger':'warn'}">${STATUS_LABEL[e.status]}</span></td>
@@ -1980,14 +2095,14 @@ async function renderHistorico(){
         ? '<tr><td colspan="8" class="empty-state">Nenhuma movimentação registrada.</td></tr>'
         : movimentacoes.map(m => `
           <tr>
-            <td>${m.data}</td>
-            <td><b>${m.produtoNome ?? nomeProduto(m.produto_id)}</b></td>
-            <td>${m.filialNome ?? nomeFilial(m.filial_id)}</td>
-            <td><span class="badge ${m.tipo==='entrada'?'ok':'warn'}">${m.tipo}</span></td>
+            <td>${escapeHtml(m.data)}</td>
+            <td><b>${escapeHtml(m.produtoNome ?? nomeProduto(m.produto_id))}</b></td>
+            <td>${escapeHtml(m.filialNome ?? nomeFilial(m.filial_id))}</td>
+            <td><span class="badge ${m.tipo==='entrada'?'ok':'warn'}">${escapeHtml(m.tipo)}</span></td>
             <td>${m.anterior}</td>
             <td>${m.nova}</td>
-            <td>${m.usuario}</td>
-            <td>${m.motivo}</td>
+            <td>${escapeHtml(m.usuario)}</td>
+            <td>${escapeHtml(m.motivo)}</td>
           </tr>
         `).join('');
     }

@@ -137,7 +137,7 @@ O banco de dados relacional PostgreSQL no Supabase contém 8 tabelas principais 
 ### 6.2 Políticas de Segurança RLS (Row Level Security)
 As políticas RLS estão definidas em `supabase_rls_policies.sql` e garantem a nível de banco:
 - **`public.usuarios` (Correção P0 Endurecida - Tarefa 15):** Leitura restrita ao próprio perfil do usuário autenticado (`email = auth.jwt() ->> 'email'`) ou a gerentes estritamente para usuários da sua própria filial (`filial_id = public.get_auth_user_filial_id()`), bloqueando consultas cross-filial.
-- **Ajuste Atômico de Estoque (`ajustar_estoque_rpc`):** Processamento transacional com bloqueio pessimista `SELECT FOR UPDATE`, impedindo saldos negativos em nivel de banco e registrando a movimentação atômica em `public.movimentacoes`.
+- **Ajuste Atômico de Estoque (`ajustar_estoque_rpc`):** Processamento transacional com autorização estrita por filial (`p_filial_id = usuario.filial_id`), bloqueio pessimista `FOR UPDATE` e chave transacional de concorrência `pg_advisory_xact_lock` para criar e atualizar linhas de estoque em concorrência sem saldos negativos.
 - **Inativação Local por Filial (`produtos_filiais_inativos`):** RLS que restringe o registro de retirada de uso de produtos exclusivamente a gerentes da própria filial (`public.get_auth_user_cargo() = 'gerente' AND filial_id = public.get_auth_user_filial_id()`), sem alterar o cadastro global nem as demais filiais.
 - Leitura de produtos, estoques e filiais para qualquer usuário autenticado.
 

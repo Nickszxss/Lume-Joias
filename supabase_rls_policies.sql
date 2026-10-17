@@ -196,8 +196,11 @@ CREATE TABLE IF NOT EXISTS public.produtos_filiais_inativos (
 
 ALTER TABLE public.produtos_filiais_inativos ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY "Leitura Inativos por Autenticado" ON public.produtos_filiais_inativos
-FOR SELECT USING (auth.role() = 'authenticated');
+CREATE POLICY "Leitura Inativos por Perfil Filial" ON public.produtos_filiais_inativos
+FOR SELECT USING (
+  public.get_auth_user_cargo() = 'gerente' OR
+  filial_id = public.get_auth_user_filial_id()
+);
 
 CREATE POLICY "Insercao Inativos Apenas Gerente Filial" ON public.produtos_filiais_inativos
 FOR INSERT WITH CHECK (
@@ -214,16 +217,30 @@ FOR DELETE USING (
 GRANT SELECT, INSERT, DELETE ON public.produtos_filiais_inativos TO authenticated;
 
 -- Atualização DML de Produtos Legados ('GERAL'/'Geral') para Categorias Oficiais
-UPDATE public.produtos SET descricao = 'COLAR' WHERE nome IN ('Colar de prata', 'Colar de ouro') AND (descricao IS NULL OR descricao IN ('GERAL', 'Geral', ''));
-UPDATE public.produtos SET descricao = 'ANEL' WHERE nome IN ('Anel de prata', 'Anel de ouro') AND (descricao IS NULL OR descricao IN ('GERAL', 'Geral', ''));
-UPDATE public.produtos SET descricao = 'BRINCO' WHERE nome IN ('Brinco de prata', 'Brinco de ouro') AND (descricao IS NULL OR descricao IN ('GERAL', 'Geral', ''));
-UPDATE public.produtos SET descricao = 'SOLITARIA' WHERE nome IN ('Solitária') AND (descricao IS NULL OR descricao IN ('GERAL', 'Geral', ''));
-UPDATE public.produtos SET descricao = 'PULSEIRA' WHERE nome IN ('Pulseira de prata', 'Pulseira de ouro') AND (descricao IS NULL OR descricao IN ('GERAL', 'Geral', ''));
+-- Atualização DML Condicional e Segura de Produtos Legados para Categorias Oficiais
+-- Mapeia estritamente nomes conhecidos de produtos oficiais preservando descrições customizadas de terceiros
+DO $$
+DECLARE
+    v_invalid_count integer;
+BEGIN
+    UPDATE public.produtos SET descricao = 'COLAR' WHERE nome IN ('Colar de prata', 'Colar de ouro') AND (descricao IS NULL OR descricao IN ('GERAL', 'Geral', ''));
+    UPDATE public.produtos SET descricao = 'ANEL' WHERE nome IN ('Anel de prata', 'Anel de ouro') AND (descricao IS NULL OR descricao IN ('GERAL', 'Geral', ''));
+    UPDATE public.produtos SET descricao = 'BRINCO' WHERE nome IN ('Brinco de prata', 'Brinco de ouro') AND (descricao IS NULL OR descricao IN ('GERAL', 'Geral', ''));
+    UPDATE public.produtos SET descricao = 'SOLITARIA' WHERE nome IN ('Solitária') AND (descricao IS NULL OR descricao IN ('GERAL', 'Geral', ''));
+    UPDATE public.produtos SET descricao = 'PULSEIRA' WHERE nome IN ('Pulseira de prata', 'Pulseira de ouro') AND (descricao IS NULL OR descricao IN ('GERAL', 'Geral', ''));
 
--- Constraint de Validação de Categoria em public.produtos
-ALTER TABLE public.produtos DROP CONSTRAINT IF EXISTS produtos_categoria_check;
-ALTER TABLE public.produtos ADD CONSTRAINT produtos_categoria_check
-CHECK (descricao IN ('ANEL', 'PULSEIRA', 'SOLITARIA', 'COLAR', 'BRINCO'));
+    SELECT count(*) INTO v_invalid_count
+    FROM public.produtos
+    WHERE descricao IS NULL OR descricao NOT IN ('ANEL', 'PULSEIRA', 'SOLITARIA', 'COLAR', 'BRINCO');
+
+    IF v_invalid_count > 0 THEN
+        RAISE EXCEPTION 'MIGRAÇÃO SUSPENSA: Existem % produtos na tabela public.produtos com categoria invalida ou nao reconhecida. Regularize as categorias antes de aplicar a constraint CHECK.', v_invalid_count;
+    ELSE
+        ALTER TABLE public.produtos DROP CONSTRAINT IF EXISTS produtos_categoria_check;
+        ALTER TABLE public.produtos ADD CONSTRAINT produtos_categoria_check
+        CHECK (descricao IN ('ANEL', 'PULSEIRA', 'SOLITARIA', 'COLAR', 'BRINCO'));
+    END IF;
+END $$;
 
 -- 7. POLÍTICAS E CONCESSÕES DA TABELA 'estoques'
 CREATE POLICY "Leitura Estoques por Perfil" ON public.estoques
@@ -250,7 +267,8 @@ FOR UPDATE USING (
 GRANT SELECT, INSERT, UPDATE ON public.estoques TO authenticated;
 
 -- RPC Transacional Atômico para Ajuste de Estoque
--- Bloqueia a linha de estoque com SELECT FOR UPDATE, impede saldo negativo, atualiza saldo e registra a movimentação auditável na mesma transação.
+-- RPC Transacional Atômico para Ajuste de Estoque (Endurecido - P0 Autorização & Concorrência)
+-- Proteção estrita por filial, validação de ativos e bloqueio transacional por chave de advisory lock para linhas inexistentes.
 CREATE OR REPLACE FUNCTION public.ajustar_estoque_rpc(
   p_produto_id bigint,
   p_filial_id bigint,
@@ -268,9 +286,13 @@ DECLARE
   v_user_id bigint;
   v_user_cargo text;
   v_user_filial_id bigint;
+  v_filial_ativa boolean;
+  v_prod_ativo boolean;
   v_qtd_ant integer;
   v_qtd_nova integer;
+  v_lock_key bigint;
 BEGIN
+  -- 1. Autenticação e Verificação de Usuário
   v_user_email := (auth.jwt() ->> 'email');
   IF v_user_email IS NULL THEN
     RAISE EXCEPTION 'Acesso negado: Usuario nao autenticado.';
@@ -285,8 +307,23 @@ BEGIN
     RAISE EXCEPTION 'Acesso negado: Conta invalida ou inativa.';
   END IF;
 
-  IF v_user_cargo != 'gerente' AND v_user_filial_id != p_filial_id THEN
-    RAISE EXCEPTION 'Acesso negado: Funcionarios so podem alterar o estoque de sua propria filial.';
+  -- Regra P0 de Autorização Estrita: Tanto gerentes quanto funcionários SÓ PODEM alterar o estoque da PRÓPRIA filial.
+  IF v_user_filial_id IS NULL OR v_user_filial_id != p_filial_id THEN
+    RAISE EXCEPTION 'Acesso negado: Usuario nao possui permissao para ajustar o estoque de outra filial (Filial Alvo: %, Sua Filial: %).', p_filial_id, v_user_filial_id;
+  END IF;
+
+  -- 2. Validação de Filial e Produto Ativos
+  SELECT ativa INTO v_filial_ativa FROM public.filiais WHERE id = p_filial_id LIMIT 1;
+  IF v_filial_ativa IS NULL THEN
+    RAISE EXCEPTION 'Operacao negada: Filial ID % nao encontrada.', p_filial_id;
+  END IF;
+  IF v_filial_ativa = false THEN
+    RAISE EXCEPTION 'Operacao negada: Filial ID % esta inativa.', p_filial_id;
+  END IF;
+
+  SELECT ativo INTO v_prod_ativo FROM public.produtos WHERE id = p_produto_id LIMIT 1;
+  IF v_prod_ativo IS NULL THEN
+    RAISE EXCEPTION 'Operacao negada: Produto ID % nao encontrado.', p_produto_id;
   END IF;
 
   IF p_quantidade <= 0 THEN
@@ -297,11 +334,20 @@ BEGIN
     RAISE EXCEPTION 'Operacao negada: Tipo de ajuste invalido (%). Use entrada ou saida.', p_tipo;
   END IF;
 
-  -- 1. Obter e bloquear linha do estoque (SELECT FOR UPDATE)
-  SELECT COALESCE(
-    (SELECT quantidade FROM public.estoques WHERE filial_id = p_filial_id AND produto_id = p_produto_id FOR UPDATE),
-    0
-  ) INTO v_qtd_ant;
+  -- 3. Proteção contra Concorrência em Registros Inexistentes (P0 Concorrência)
+  -- Bloqueio transacional advisory lock baseado na chave composta (p_filial_id, p_produto_id)
+  v_lock_key := pg_catalog.hashtext(p_filial_id::text || '_' || p_produto_id::text);
+  PERFORM pg_catalog.pg_advisory_xact_lock(v_lock_key);
+
+  -- 4. Obter e bloquear linha existente do estoque
+  SELECT quantidade INTO v_qtd_ant
+  FROM public.estoques
+  WHERE filial_id = p_filial_id AND produto_id = p_produto_id
+  FOR UPDATE;
+
+  IF v_qtd_ant IS NULL THEN
+    v_qtd_ant := 0;
+  END IF;
 
   IF p_tipo = 'saida' THEN
     IF v_qtd_ant < p_quantidade THEN
@@ -312,7 +358,7 @@ BEGIN
     v_qtd_nova := v_qtd_ant + p_quantidade;
   END IF;
 
-  -- 2. Atualizar ou inserir estoque de forma atômica
+  -- 5. Atualizar ou inserir estoque de forma atômica
   INSERT INTO public.estoques (filial_id, produto_id, quantidade, status, updated_at)
   VALUES (p_filial_id, p_produto_id, v_qtd_nova, CASE WHEN v_qtd_nova = 0 THEN 'zerado' ELSE 'suficiente' END, now())
   ON CONFLICT (filial_id, produto_id) DO UPDATE
@@ -320,7 +366,7 @@ BEGIN
       status = EXCLUDED.status,
       updated_at = now();
 
-  -- 3. Registrar movimentação auditável no histórico
+  -- 6. Registrar movimentação auditável na mesma transação
   INSERT INTO public.movimentacoes (produto_id, filial_id, usuario_id, tipo, quantidade, quantidade_anterior, quantidade_nova, motivo, created_at)
   VALUES (p_produto_id, p_filial_id, v_user_id, p_tipo, p_quantidade, v_qtd_ant, v_qtd_nova, COALESCE(p_motivo, 'Ajuste manual de estoque'), now());
 

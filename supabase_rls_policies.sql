@@ -13,9 +13,19 @@ ALTER TABLE public.transferencias ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.pedidos_compra ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.itens_pedido_compra ENABLE ROW LEVEL SECURITY;
 
--- Constraint de Integridade do Banco: Impedir estoques negativos a nível de DDL
-ALTER TABLE public.estoques DROP CONSTRAINT IF EXISTS estoques_quantidade_nonnegative;
-ALTER TABLE public.estoques ADD CONSTRAINT estoques_quantidade_nonnegative CHECK (quantidade >= 0);
+-- Constraint de Integridade do Banco: Validação preventiva antes de aplicar CHECK (quantidade >= 0)
+DO $$
+DECLARE
+    v_negatives_count integer;
+BEGIN
+    SELECT count(*) INTO v_negatives_count FROM public.estoques WHERE quantidade < 0;
+    IF v_negatives_count > 0 THEN
+        RAISE NOTICE 'AVISO DE SEGURANÇA: Existem % registros com quantidade negativa em public.estoques. Corrija os saldos antes de aplicar a constraint CHECK (quantidade >= 0).', v_negatives_count;
+    ELSE
+        ALTER TABLE public.estoques DROP CONSTRAINT IF EXISTS estoques_quantidade_nonnegative;
+        ALTER TABLE public.estoques ADD CONSTRAINT estoques_quantidade_nonnegative CHECK (quantidade >= 0);
+    END IF;
+END $$;
 
 -- 2. Funções auxiliares para extrair perfil e filial do usuário autenticado no JWT
 -- Endurecidas com SECURITY DEFINER e search_path totalmente limpo (SET search_path = '') com qualificações explícitas.

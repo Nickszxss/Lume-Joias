@@ -223,7 +223,7 @@ FOR INSERT WITH CHECK (
 
 GRANT SELECT, INSERT ON public.movimentacoes TO authenticated;
 
--- 9. POLÍTICAS E CONCESSÕES DA TABELA 'transferencias'
+-- 9. POLÍTICAS E CONCESSÕES DA TABELA 'transferencias' E RPC ATÔMICO
 CREATE POLICY "Leitura Transferencias por Perfil" ON public.transferencias
 FOR SELECT USING (
   public.get_auth_user_cargo() = 'gerente' OR
@@ -251,7 +251,88 @@ REVOKE UPDATE ON public.transferencias FROM PUBLIC, anon, authenticated;
 REVOKE UPDATE (id, origem_id, destino_id, produto_id, usuario_id, quantidade, created_at) ON public.transferencias FROM PUBLIC, anon, authenticated;
 GRANT UPDATE (status, observacao, concluida_at) ON public.transferencias TO authenticated;
 
--- 10. POLÍTICAS E CONCESSÕES DAS TABELAS 'pedidos_compra' E 'itens_pedido_compra'
+-- RPC Transacional Atômico para Conclusão de Transferência (Bloqueio de linha FOR UPDATE, rollback automático em falhas e idempotência)
+CREATE OR REPLACE FUNCTION public.concluir_transferencia_rpc(
+  p_transferencia_id bigint,
+  p_observacao text DEFAULT NULL
+)
+RETURNS json
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+DECLARE
+  v_transf record;
+  v_user_email text;
+  v_user_id bigint;
+  v_user_cargo text;
+  v_user_filial_id bigint;
+BEGIN
+  v_user_email := (auth.jwt() ->> 'email');
+  IF v_user_email IS NULL THEN
+    RAISE EXCEPTION 'Acesso negado: Usuario nao autenticado.';
+  END IF;
+
+  SELECT id, cargo, filial_id INTO v_user_id, v_user_cargo, v_user_filial_id
+  FROM public.usuarios
+  WHERE email = v_user_email AND ativo = true
+  LIMIT 1;
+
+  IF v_user_id IS NULL THEN
+    RAISE EXCEPTION 'Acesso negado: Conta invalida ou inativa.';
+  END IF;
+
+  SELECT * INTO v_transf
+  FROM public.transferencias
+  WHERE id = p_transferencia_id
+  FOR UPDATE;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Transferencia ID % nao encontrada.', p_transferencia_id;
+  END IF;
+
+  IF v_transf.status = 'concluida' THEN
+    RAISE EXCEPTION 'Operacao negada: Transferencia ID % ja foi concluida anteriormente em %.', p_transferencia_id, v_transf.concluida_at;
+  END IF;
+
+  IF v_transf.status != 'pendente' THEN
+    RAISE EXCEPTION 'Operacao negada: Transferencia ID % possui status invalido (%) para conclusao.', p_transferencia_id, v_transf.status;
+  END IF;
+
+  IF v_user_cargo != 'gerente' AND v_user_filial_id != v_transf.destino_id THEN
+    RAISE EXCEPTION 'Acesso negado: Somente gerentes ou funcionarios da filial de destino podem concluir a transferencia.';
+  END IF;
+
+  UPDATE public.estoques
+  SET quantidade = quantidade - v_transf.quantidade, updated_at = now()
+  WHERE filial_id = v_transf.origem_id AND produto_id = v_transf.produto_id;
+
+  INSERT INTO public.estoques (filial_id, produto_id, quantidade, status, updated_at)
+  VALUES (v_transf.destino_id, v_transf.produto_id, v_transf.quantidade, 'Disponivel', now())
+  ON CONFLICT (filial_id, produto_id) DO UPDATE
+  SET quantidade = public.estoques.quantidade + EXCLUDED.quantidade,
+      updated_at = now();
+
+  INSERT INTO public.movimentacoes (produto_id, filial_id, usuario_id, tipo, quantidade, quantidade_anterior, quantidade_nova, motivo, created_at)
+  VALUES (v_transf.produto_id, v_transf.origem_id, v_user_id, 'saida', v_transf.quantidade, 0, 0, COALESCE(p_observacao, 'Transferencia Concluida (Saida Origem)'), now());
+
+  INSERT INTO public.movimentacoes (produto_id, filial_id, usuario_id, tipo, quantidade, quantidade_anterior, quantidade_nova, motivo, created_at)
+  VALUES (v_transf.produto_id, v_transf.destino_id, v_user_id, 'entrada', v_transf.quantidade, 0, 0, COALESCE(p_observacao, 'Transferencia Concluida (Entrada Destino)'), now());
+
+  UPDATE public.transferencias
+  SET status = 'concluida',
+      observacao = COALESCE(p_observacao, observacao),
+      concluida_at = now()
+  WHERE id = p_transferencia_id;
+
+  RETURN json_build_object('success', true, 'message', 'Transferencia concluida com sucesso.', 'transferencia_id', p_transferencia_id);
+END;
+$$;
+
+REVOKE EXECUTE ON FUNCTION public.concluir_transferencia_rpc(bigint, text) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.concluir_transferencia_rpc(bigint, text) TO authenticated;
+
+-- 10. POLÍTICAS E CONCESSÕES DAS TABELAS 'pedidos_compra' E 'itens_pedido_compra' E RPC ATÔMICO
 CREATE POLICY "Leitura Pedidos Compra por Perfil" ON public.pedidos_compra
 FOR SELECT USING (
   public.get_auth_user_cargo() = 'gerente' OR
@@ -293,3 +374,82 @@ FOR INSERT WITH CHECK (
 );
 
 GRANT SELECT, INSERT ON public.itens_pedido_compra TO authenticated;
+
+-- RPC Transacional Atômico para Recebimento de Pedido de Compra (Bloqueio de linha FOR UPDATE, rollback automático e idempotência)
+CREATE OR REPLACE FUNCTION public.receber_pedido_rpc(
+  p_pedido_id bigint,
+  p_observacao text DEFAULT NULL
+)
+RETURNS json
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+DECLARE
+  v_pedido record;
+  v_item record;
+  v_user_email text;
+  v_user_id bigint;
+  v_user_cargo text;
+  v_user_filial_id bigint;
+BEGIN
+  v_user_email := (auth.jwt() ->> 'email');
+  IF v_user_email IS NULL THEN
+    RAISE EXCEPTION 'Acesso negado: Usuario nao autenticado.';
+  END IF;
+
+  SELECT id, cargo, filial_id INTO v_user_id, v_user_cargo, v_user_filial_id
+  FROM public.usuarios
+  WHERE email = v_user_email AND ativo = true
+  LIMIT 1;
+
+  IF v_user_id IS NULL THEN
+    RAISE EXCEPTION 'Acesso negado: Conta invalida ou inativa.';
+  END IF;
+
+  SELECT * INTO v_pedido
+  FROM public.pedidos_compra
+  WHERE id = p_pedido_id
+  FOR UPDATE;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Pedido de compra ID % nao encontrado.', p_pedido_id;
+  END IF;
+
+  IF v_pedido.status = 'recebido' THEN
+    RAISE EXCEPTION 'Operacao negada: Pedido ID % ja foi recebido anteriormente em %.', p_pedido_id, v_pedido.recebido_at;
+  END IF;
+
+  IF v_pedido.status != 'aberto' THEN
+    RAISE EXCEPTION 'Operacao negada: Pedido ID % possui status invalido (%) para recebimento.', p_pedido_id, v_pedido.status;
+  END IF;
+
+  IF v_user_cargo != 'gerente' AND v_user_filial_id != v_pedido.filial_id THEN
+    RAISE EXCEPTION 'Acesso negado: Usuario nao pertence a filial responsável pelo pedido.';
+  END IF;
+
+  FOR v_item IN
+    SELECT * FROM public.itens_pedido_compra WHERE pedido_id = p_pedido_id
+  LOOP
+    INSERT INTO public.estoques (filial_id, produto_id, quantidade, status, updated_at)
+    VALUES (v_pedido.filial_id, v_item.produto_id, v_item.quantidade, 'Disponivel', now())
+    ON CONFLICT (filial_id, produto_id) DO UPDATE
+    SET quantidade = public.estoques.quantidade + EXCLUDED.quantidade,
+        updated_at = now();
+
+    INSERT INTO public.movimentacoes (produto_id, filial_id, usuario_id, tipo, quantidade, quantidade_anterior, quantidade_nova, motivo, created_at)
+    VALUES (v_item.produto_id, v_pedido.filial_id, v_user_id, 'entrada', v_item.quantidade, 0, 0, COALESCE(p_observacao, 'Recebimento de Pedido de Compra'), now());
+  END LOOP;
+
+  UPDATE public.pedidos_compra
+  SET status = 'recebido',
+      observacao = COALESCE(p_observacao, observacao),
+      recebido_at = now()
+  WHERE id = p_pedido_id;
+
+  RETURN json_build_object('success', true, 'message', 'Pedido de compra recebido com sucesso.', 'pedido_id', p_pedido_id);
+END;
+$$;
+
+REVOKE EXECUTE ON FUNCTION public.receber_pedido_rpc(bigint, text) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.receber_pedido_rpc(bigint, text) TO authenticated;

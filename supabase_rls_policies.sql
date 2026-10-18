@@ -656,7 +656,7 @@ BEGIN
 
   -- 3. Processar cada item
   FOR v_item IN
-    SELECT * FROM public.itens_pedido_compra WHERE pedido_id = p_pedido_id
+    SELECT * FROM public.itens_pedido_compra WHERE pedido_id = p_pedido_id ORDER BY produto_id ASC
   LOOP
     IF v_item.quantidade <= 0 THEN
       RAISE EXCEPTION 'Operacao negada: Item ID % possui quantidade invalida (%).', v_item.id, v_item.quantidade;

@@ -76,7 +76,8 @@ BEGIN
         WHERE schemaname = 'public'
           AND tablename IN (
             'usuarios', 'filiais', 'produtos', 'estoques',
-            'movimentacoes', 'transferencias', 'pedidos_compra', 'itens_pedido_compra'
+            'movimentacoes', 'transferencias', 'pedidos_compra', 'itens_pedido_compra',
+            'produtos_filiais_inativos'
           )
     LOOP
         EXECUTE format('DROP POLICY IF EXISTS %I ON %I.%I', pol.policyname, pol.schemaname, pol.tablename);
@@ -121,7 +122,8 @@ BEGIN
           AND tn.nspname = 'public'
           AND t.relname IN (
             'usuarios', 'filiais', 'produtos', 'estoques',
-            'movimentacoes', 'transferencias', 'pedidos_compra', 'itens_pedido_compra'
+            'movimentacoes', 'transferencias', 'pedidos_compra', 'itens_pedido_compra',
+            'produtos_filiais_inativos'
           )
     LOOP
         EXECUTE format('GRANT USAGE, SELECT ON SEQUENCE %I.%I TO authenticated', seq.seqschema, seq.seqname);
@@ -173,8 +175,10 @@ GRANT SELECT ON public.filiais TO anon, authenticated;
 
 CREATE POLICY "Leitura Publica Produtos" ON public.produtos FOR SELECT USING (true);
 
-CREATE POLICY "Insercao Produtos por Autenticado" ON public.produtos
-FOR INSERT WITH CHECK (auth.role() = 'authenticated');
+CREATE POLICY "Insercao Produtos Apenas Gerente" ON public.produtos
+FOR INSERT WITH CHECK (
+  public.get_auth_user_cargo() = 'gerente'
+);
 
 CREATE POLICY "Atualizacao Produtos Apenas Gerente" ON public.produtos
 FOR UPDATE USING (
@@ -397,13 +401,10 @@ FOR SELECT USING (
   filial_id = public.get_auth_user_filial_id()
 );
 
-CREATE POLICY "Insercao Movimentacoes por Perfil" ON public.movimentacoes
-FOR INSERT WITH CHECK (
-  public.get_auth_user_cargo() = 'gerente' OR
-  filial_id = public.get_auth_user_filial_id()
-);
-
-GRANT SELECT, INSERT ON public.movimentacoes TO authenticated;
+-- Inserção direta bloqueada no SDK REST para evitar forja de histórico.
+-- Registros de movimentações DEVEM obrigatoriamente ser gerados via RPCs SECURITY DEFINER.
+REVOKE ALL ON public.movimentacoes FROM PUBLIC, anon, authenticated;
+GRANT SELECT ON public.movimentacoes TO authenticated;
 
 -- 9. POLÍTICAS E CONCESSÕES DA TABELA 'transferencias' E RPC ATÔMICO
 CREATE POLICY "Leitura Transferencias por Perfil" ON public.transferencias
@@ -415,8 +416,11 @@ FOR SELECT USING (
 
 CREATE POLICY "Insercao Transferencias por Perfil" ON public.transferencias
 FOR INSERT WITH CHECK (
-  public.get_auth_user_cargo() = 'gerente' OR
-  origem_id = public.get_auth_user_filial_id()
+  (
+    public.get_auth_user_cargo() = 'gerente' OR
+    origem_id = public.get_auth_user_filial_id()
+  ) AND
+  status = 'pendente'
 );
 
 GRANT SELECT, INSERT ON public.transferencias TO authenticated;
@@ -563,7 +567,8 @@ FOR SELECT USING (
 
 CREATE POLICY "Insercao Pedidos Compra Apenas Gerente" ON public.pedidos_compra
 FOR INSERT WITH CHECK (
-  public.get_auth_user_cargo() = 'gerente'
+  public.get_auth_user_cargo() = 'gerente' AND
+  status = 'aberto'
 );
 
 GRANT SELECT, INSERT ON public.pedidos_compra TO authenticated;

@@ -76,8 +76,11 @@ def test_validar_sintaxe_sql_auth_jwt():
     assert "EXECUTE format('DROP POLICY IF EXISTS %I ON public.usuarios', pol.policyname);" in content, "Bloco PL/pgSQL idempotente para remoção de políticas de usuarios ausente!"
     assert "concluir_transferencia_rpc" in content, "Função RPC transacional concluir_transferencia_rpc ausente!"
     assert "receber_pedido_rpc" in content, "Função RPC transacional receber_pedido_rpc ausente!"
+    assert "ajustar_estoque_rpc" in content, "Função RPC transacional ajustar_estoque_rpc ausente!"
+    assert "pg_advisory_xact_lock" in content, "Bloqueio de concorrência por chave pg_advisory_xact_lock ausente!"
+    assert "Leitura Inativos Estrita por Filial" in content, "Política RLS de Leitura Inativos Estrita por Filial ausente!"
     assert "FOR UPDATE;" in content, "Bloqueio de linha FOR UPDATE para prevenir concorrência e execuções duplicadas ausente no RPC!"
-    print("[TESTE ESTÁTICO SQL APROVADO] Sintaxe 'auth.jwt()', SET search_path = '', RPCs transacionais com FOR UPDATE e limpeza idempotente de políticas validados.")
+    print("[TESTE ESTÁTICO SQL APROVADO] Sintaxe 'auth.jwt()', SET search_path = '', RPCs transacionais com FOR UPDATE e advisory lock validados.")
 
 def main():
     print("=== INICIANDO EXECUÇÃO DA MATRIZ DE TESTES DE SEGURANÇA ST-01 A ST-10 ===")

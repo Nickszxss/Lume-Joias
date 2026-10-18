@@ -250,8 +250,11 @@ FOR SELECT USING (
 
 CREATE POLICY "Insercao Estoques por Perfil" ON public.estoques
 FOR INSERT WITH CHECK (
-  public.get_auth_user_cargo() = 'gerente' OR
-  filial_id = public.get_auth_user_filial_id()
+  (
+    public.get_auth_user_cargo() = 'gerente' OR
+    filial_id = public.get_auth_user_filial_id()
+  ) AND
+  quantidade = 0
 );
 
 CREATE POLICY "Atualizacao Estoques por Perfil" ON public.estoques

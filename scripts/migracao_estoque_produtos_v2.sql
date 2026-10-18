@@ -1,7 +1,8 @@
 -- =====================================================================
--- SCRIPT DE MIGRAÇÃO DEDICADO E TRANSACIONAL — LUME JOIAS (v2.0 REVISADO)
--- Objeto: Ajuste de Estoque, Categorias Automáticas e Inativação Local por Filial
--- Arquitetura: Supabase PostgreSQL
+-- SCRIPT DE MIGRAÇÃO DEDICADO E TRANSACIONAL — LUME JOIAS (v2.0 OFICIAL)
+-- Objeto: Ajuste de Estoque, Categorias Automáticas, Inativação Local por Filial
+--         e Fechamento de UPDATE Direto em Estoques.
+-- Arquitetura: Supabase PostgreSQL (GitHub Pages + Supabase Client)
 -- =====================================================================
 
 BEGIN;
@@ -21,7 +22,7 @@ BEGIN;
 -- ---------------------------------------------------------------------
 
 -- ---------------------------------------------------------------------
--- 2. VERIFICAÇÃO DE FUNÇÕES AUXILIARES OBRIGATÓRIAS
+-- 2. VERIFICAÇÃO E RECRIAÇÃO DE FUNÇÕES AUXILIARES OBRIGATÓRIAS
 -- Garantir existência das funções get_auth_user_cargo() e get_auth_user_filial_id()
 -- ---------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.get_auth_user_cargo()
@@ -58,7 +59,7 @@ GRANT EXECUTE ON FUNCTION public.get_auth_user_cargo() TO authenticated;
 GRANT EXECUTE ON FUNCTION public.get_auth_user_filial_id() TO authenticated;
 
 -- ---------------------------------------------------------------------
--- 3. TABELA DE INATIVAÇÃO LOCAL DE PRODUTOS POR FILIAL
+-- 3. TABELA E POLÍTICAS RLS DE INATIVAÇÃO LOCAL DE PRODUTOS POR FILIAL
 -- ---------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS public.produtos_filiais_inativos (
     id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -78,6 +79,7 @@ DROP POLICY IF EXISTS "Leitura Inativos por Autenticado" ON public.produtos_fili
 DROP POLICY IF EXISTS "Insercao Inativos Apenas Gerente Filial" ON public.produtos_filiais_inativos;
 DROP POLICY IF EXISTS "Exclusao Inativos Apenas Gerente Filial" ON public.produtos_filiais_inativos;
 
+-- Criar Políticas RLS com isolamento estrito por filial
 CREATE POLICY "Leitura Inativos Estrita por Filial" ON public.produtos_filiais_inativos
 FOR SELECT USING (
   filial_id = public.get_auth_user_filial_id()
@@ -124,8 +126,18 @@ BEGIN
 END $$;
 
 -- ---------------------------------------------------------------------
--- 5. FECHAMENTO DE UPDATE DIRETO EM ESTOQUES
+-- 5. FECHAMENTO DE ESCRITA DIRETA EM ESTOQUES E REAJUSTE DE POLÍTICAS
 -- ---------------------------------------------------------------------
+DROP POLICY IF EXISTS "Insercao Estoques por Perfil" ON public.estoques;
+CREATE POLICY "Insercao Estoques por Perfil" ON public.estoques
+FOR INSERT WITH CHECK (
+  (
+    public.get_auth_user_cargo() = 'gerente' OR
+    filial_id = public.get_auth_user_filial_id()
+  ) AND
+  quantidade = 0
+);
+
 REVOKE UPDATE ON public.estoques FROM PUBLIC, anon, authenticated;
 GRANT SELECT, INSERT ON public.estoques TO authenticated;
 

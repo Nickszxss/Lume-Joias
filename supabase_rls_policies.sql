@@ -3,6 +3,8 @@
 -- Arquitetura: Supabase PostgreSQL (GitHub Pages + Supabase Client)
 -- =====================================================================
 
+BEGIN;
+
 -- 1. Habilitar RLS nas 8 tabelas públicas do sistema
 ALTER TABLE public.usuarios ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.filiais ENABLE ROW LEVEL SECURITY;
@@ -219,31 +221,6 @@ FOR DELETE USING (
 
 GRANT SELECT, INSERT, DELETE ON public.produtos_filiais_inativos TO authenticated;
 
--- Atualização DML de Produtos Legados ('GERAL'/'Geral') para Categorias Oficiais
--- Atualização DML Condicional e Segura de Produtos Legados para Categorias Oficiais
--- Mapeia estritamente nomes conhecidos de produtos oficiais preservando descrições customizadas de terceiros
-DO $$
-DECLARE
-    v_invalid_count integer;
-BEGIN
-    UPDATE public.produtos SET descricao = 'COLAR' WHERE nome IN ('Colar de prata', 'Colar de ouro') AND (descricao IS NULL OR descricao IN ('GERAL', 'Geral', ''));
-    UPDATE public.produtos SET descricao = 'ANEL' WHERE nome IN ('Anel de prata', 'Anel de ouro') AND (descricao IS NULL OR descricao IN ('GERAL', 'Geral', ''));
-    UPDATE public.produtos SET descricao = 'BRINCO' WHERE nome IN ('Brinco de prata', 'Brinco de ouro') AND (descricao IS NULL OR descricao IN ('GERAL', 'Geral', ''));
-    UPDATE public.produtos SET descricao = 'SOLITARIA' WHERE nome IN ('Solitária') AND (descricao IS NULL OR descricao IN ('GERAL', 'Geral', ''));
-    UPDATE public.produtos SET descricao = 'PULSEIRA' WHERE nome IN ('Pulseira de prata', 'Pulseira de ouro') AND (descricao IS NULL OR descricao IN ('GERAL', 'Geral', ''));
-
-    SELECT count(*) INTO v_invalid_count
-    FROM public.produtos
-    WHERE descricao IS NULL OR descricao NOT IN ('ANEL', 'PULSEIRA', 'SOLITARIA', 'COLAR', 'BRINCO');
-
-    IF v_invalid_count > 0 THEN
-        RAISE EXCEPTION 'MIGRAÇÃO SUSPENSA: Existem % produtos na tabela public.produtos com categoria invalida ou nao reconhecida. Regularize as categorias antes de aplicar a constraint CHECK.', v_invalid_count;
-    ELSE
-        ALTER TABLE public.produtos DROP CONSTRAINT IF EXISTS produtos_categoria_check;
-        ALTER TABLE public.produtos ADD CONSTRAINT produtos_categoria_check
-        CHECK (descricao IN ('ANEL', 'PULSEIRA', 'SOLITARIA', 'COLAR', 'BRINCO'));
-    END IF;
-END $$;
 
 -- 7. POLÍTICAS E CONCESSÕES DA TABELA 'estoques'
 CREATE POLICY "Leitura Estoques por Perfil" ON public.estoques
@@ -420,6 +397,8 @@ FOR INSERT WITH CHECK (
     public.get_auth_user_cargo() = 'gerente' OR
     origem_id = public.get_auth_user_filial_id()
   ) AND
+  origem_id != destino_id AND
+  quantidade > 0 AND
   status = 'pendente'
 );
 
@@ -587,7 +566,17 @@ FOR SELECT USING (
 
 CREATE POLICY "Insercao Itens Pedido Compra Apenas Gerente" ON public.itens_pedido_compra
 FOR INSERT WITH CHECK (
-  public.get_auth_user_cargo() = 'gerente'
+  public.get_auth_user_cargo() = 'gerente' AND
+  quantidade > 0 AND
+  EXISTS (
+    SELECT 1 FROM public.pedidos_compra p
+    WHERE p.id = itens_pedido_compra.pedido_id
+      AND p.status = 'aberto'
+      AND (
+        public.get_auth_user_cargo() = 'gerente' OR
+        p.filial_id = public.get_auth_user_filial_id()
+      )
+  )
 );
 
 GRANT SELECT, INSERT ON public.itens_pedido_compra TO authenticated;
@@ -695,7 +684,8 @@ BEGIN
   UPDATE public.pedidos_compra
   SET status = 'recebido',
       observacao = COALESCE(p_observacao, observacao),
-      recebido_at = now()
+      recebido_at = now(),
+      recebido_por = v_user_id
   WHERE id = p_pedido_id;
 
   RETURN json_build_object('success', true, 'message', 'Pedido de compra recebido com sucesso.', 'pedido_id', p_pedido_id);
@@ -704,3 +694,5 @@ $$;
 
 REVOKE EXECUTE ON FUNCTION public.receber_pedido_rpc(bigint, text) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.receber_pedido_rpc(bigint, text) TO authenticated;
+
+COMMIT;

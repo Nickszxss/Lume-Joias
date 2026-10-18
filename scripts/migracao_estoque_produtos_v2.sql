@@ -126,9 +126,11 @@ BEGIN
 END $$;
 
 -- ---------------------------------------------------------------------
--- 5. FECHAMENTO DE ESCRITA DIRETA EM ESTOQUES E REAJUSTE DE POLÍTICAS
+-- 5. FECHAMENTO RIGOROSO DE UPDATE DIRETO E COLUNA EM ESTOQUES
 -- ---------------------------------------------------------------------
 DROP POLICY IF EXISTS "Insercao Estoques por Perfil" ON public.estoques;
+DROP POLICY IF EXISTS "Atualizacao Estoques por Perfil" ON public.estoques;
+
 CREATE POLICY "Insercao Estoques por Perfil" ON public.estoques
 FOR INSERT WITH CHECK (
   (
@@ -138,8 +140,12 @@ FOR INSERT WITH CHECK (
   quantidade = 0
 );
 
-REVOKE UPDATE ON public.estoques FROM PUBLIC, anon, authenticated;
+-- Revogação total em nível de tabela e de todas as colunas
+REVOKE ALL ON public.estoques FROM PUBLIC, anon, authenticated;
+REVOKE UPDATE (id, filial_id, produto_id, quantidade, status, updated_at) ON public.estoques FROM PUBLIC, anon, authenticated;
+
 GRANT SELECT, INSERT ON public.estoques TO authenticated;
+GRANT SELECT ON public.estoques TO anon;
 
 -- ---------------------------------------------------------------------
 -- 6. RPC TRANSACIONAL ATÔMICO PARA AJUSTE DE ESTOQUE

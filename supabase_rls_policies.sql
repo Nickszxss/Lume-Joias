@@ -263,7 +263,10 @@ FOR UPDATE USING (
   filial_id = public.get_auth_user_filial_id()
 );
 
-GRANT SELECT, INSERT, UPDATE ON public.estoques TO authenticated;
+-- Bloquear UPDATE direto na tabela estoques (Alterações de saldo DEVEM obrigatoriamente usar RPCs atômicas)
+-- INSERT é mantido estritamente para inicialização de registro com saldo 0 na criação de novos produtos.
+REVOKE UPDATE ON public.estoques FROM PUBLIC, anon, authenticated;
+GRANT SELECT, INSERT ON public.estoques TO authenticated;
 
 -- RPC Transacional Atômico para Ajuste de Estoque
 -- RPC Transacional Atômico para Ajuste de Estoque (Endurecido - P0 Autorização & Concorrência)
@@ -311,7 +314,21 @@ BEGIN
     RAISE EXCEPTION 'Acesso negado: Usuario nao possui permissao para ajustar o estoque de outra filial (Filial Alvo: %, Sua Filial: %).', p_filial_id, v_user_filial_id;
   END IF;
 
-  -- 2. Validação de Filial e Produto Ativos
+  -- 2. Validação Estrita de Parâmetros de Entrada
+  IF p_produto_id IS NULL THEN
+    RAISE EXCEPTION 'Operacao negada: ID do produto e obrigatorio.';
+  END IF;
+  IF p_filial_id IS NULL THEN
+    RAISE EXCEPTION 'Operacao negada: ID da filial e obrigatorio.';
+  END IF;
+  IF p_tipo IS NULL OR p_tipo NOT IN ('entrada', 'saida') THEN
+    RAISE EXCEPTION 'Operacao negada: Tipo de ajuste invalido (%). Use entrada ou saida.', p_tipo;
+  END IF;
+  IF p_quantidade IS NULL OR p_quantidade <= 0 THEN
+    RAISE EXCEPTION 'Operacao negada: Quantidade de ajuste deve ser um inteiro maior que zero.';
+  END IF;
+
+  -- 3. Validação de Filial e Produto Ativos no Catálogo Global
   SELECT ativa INTO v_filial_ativa FROM public.filiais WHERE id = p_filial_id LIMIT 1;
   IF v_filial_ativa IS NULL THEN
     RAISE EXCEPTION 'Operacao negada: Filial ID % nao encontrada.', p_filial_id;
@@ -324,13 +341,8 @@ BEGIN
   IF v_prod_ativo IS NULL THEN
     RAISE EXCEPTION 'Operacao negada: Produto ID % nao encontrado.', p_produto_id;
   END IF;
-
-  IF p_quantidade <= 0 THEN
-    RAISE EXCEPTION 'Operacao negada: Quantidade de ajuste deve ser um inteiro maior que zero.';
-  END IF;
-
-  IF p_tipo NOT IN ('entrada', 'saida') THEN
-    RAISE EXCEPTION 'Operacao negada: Tipo de ajuste invalido (%). Use entrada ou saida.', p_tipo;
+  IF v_prod_ativo = false THEN
+    RAISE EXCEPTION 'Operacao negada: Produto ID % esta inativo e nao pode receber ajustes de estoque.', p_produto_id;
   END IF;
 
   -- 3. Proteção contra Concorrência em Registros Inexistentes (P0 Concorrência)
@@ -476,7 +488,16 @@ BEGIN
     RAISE EXCEPTION 'Acesso negado: Somente gerentes ou funcionarios da filial de destino podem concluir a transferencia.';
   END IF;
 
-  -- 2. Validar e bloquear estoque da origem (SELECT FOR UPDATE)
+  -- 2. Advisory Lock determinístico em ordem de ID de filial para prevenir deadlock entre origem e destino
+  IF v_transf.origem_id < v_transf.destino_id THEN
+    PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtext(v_transf.origem_id::text || '_' || v_transf.produto_id::text));
+    PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtext(v_transf.destino_id::text || '_' || v_transf.produto_id::text));
+  ELSE
+    PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtext(v_transf.destino_id::text || '_' || v_transf.produto_id::text));
+    PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtext(v_transf.origem_id::text || '_' || v_transf.produto_id::text));
+  END IF;
+
+  -- 3. Validar e bloquear estoque da origem (SELECT FOR UPDATE)
   SELECT quantidade INTO v_origem_qtd_ant
   FROM public.estoques
   WHERE filial_id = v_transf.origem_id AND produto_id = v_transf.produto_id
@@ -492,7 +513,7 @@ BEGIN
 
   v_origem_qtd_nova := v_origem_qtd_ant - v_transf.quantidade;
 
-  -- 3. Bloquear e calcular estoque do destino
+  -- 4. Bloquear e calcular estoque do destino
   SELECT COALESCE(
     (SELECT quantidade FROM public.estoques WHERE filial_id = v_transf.destino_id AND produto_id = v_transf.produto_id FOR UPDATE),
     0
@@ -500,16 +521,19 @@ BEGIN
 
   v_dest_qtd_nova := v_dest_qtd_ant + v_transf.quantidade;
 
-  -- 4. Atualizar estoque da origem
+  -- 5. Atualizar estoque da origem com status padronizado
   UPDATE public.estoques
-  SET quantidade = v_origem_qtd_nova, updated_at = now()
+  SET quantidade = v_origem_qtd_nova,
+      status = CASE WHEN v_origem_qtd_nova = 0 THEN 'zerado' ELSE 'suficiente' END,
+      updated_at = now()
   WHERE filial_id = v_transf.origem_id AND produto_id = v_transf.produto_id;
 
-  -- 5. Atualizar/Inserir estoque do destino
+  -- 6. Atualizar/Inserir estoque do destino com status padronizado
   INSERT INTO public.estoques (filial_id, produto_id, quantidade, status, updated_at)
-  VALUES (v_transf.destino_id, v_transf.produto_id, v_transf.quantidade, 'Disponivel', now())
+  VALUES (v_transf.destino_id, v_transf.produto_id, v_dest_qtd_nova, CASE WHEN v_dest_qtd_nova = 0 THEN 'zerado' ELSE 'suficiente' END, now())
   ON CONFLICT (filial_id, produto_id) DO UPDATE
-  SET quantidade = public.estoques.quantidade + EXCLUDED.quantidade,
+  SET quantidade = EXCLUDED.quantidade,
+      status = EXCLUDED.status,
       updated_at = now();
 
   -- 6. Registrar movimentações auditáveis com saldos anteriores e posteriores REAIS
@@ -641,6 +665,9 @@ BEGIN
       RAISE EXCEPTION 'Operacao negada: Item ID % possui quantidade invalida (%).', v_item.id, v_item.quantidade;
     END IF;
 
+    -- Advisory Lock transacional por chave de produto/filial
+    PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtext(v_pedido.filial_id::text || '_' || v_item.produto_id::text));
+
     -- Obter e bloquear estoque anterior
     SELECT COALESCE(
       (SELECT quantidade FROM public.estoques WHERE filial_id = v_pedido.filial_id AND produto_id = v_item.produto_id FOR UPDATE),
@@ -649,11 +676,12 @@ BEGIN
 
     v_dest_qtd_nova := v_dest_qtd_ant + v_item.quantidade;
 
-    -- Incrementar estoque
+    -- Incrementar estoque com status padronizado
     INSERT INTO public.estoques (filial_id, produto_id, quantidade, status, updated_at)
-    VALUES (v_pedido.filial_id, v_item.produto_id, v_item.quantidade, 'Disponivel', now())
+    VALUES (v_pedido.filial_id, v_item.produto_id, v_dest_qtd_nova, CASE WHEN v_dest_qtd_nova = 0 THEN 'zerado' ELSE 'suficiente' END, now())
     ON CONFLICT (filial_id, produto_id) DO UPDATE
-    SET quantidade = public.estoques.quantidade + EXCLUDED.quantidade,
+    SET quantidade = EXCLUDED.quantidade,
+        status = EXCLUDED.status,
         updated_at = now();
 
     -- Registrar movimentação auditável com saldos anteriores e posteriores REAIS

@@ -257,19 +257,13 @@ FOR INSERT WITH CHECK (
   quantidade = 0
 );
 
-CREATE POLICY "Atualizacao Estoques por Perfil" ON public.estoques
-FOR UPDATE USING (
-  public.get_auth_user_cargo() = 'gerente' OR
-  filial_id = public.get_auth_user_filial_id()
-) WITH CHECK (
-  public.get_auth_user_cargo() = 'gerente' OR
-  filial_id = public.get_auth_user_filial_id()
-);
+-- Bloquear UPDATE direto na tabela e em todas as colunas de public.estoques
+-- (Alterações de saldo DEVEM obrigatoriamente ser executadas via RPCs atômicas SECURITY DEFINER)
+REVOKE ALL ON public.estoques FROM PUBLIC, anon, authenticated;
+REVOKE UPDATE (id, filial_id, produto_id, quantidade, status, updated_at) ON public.estoques FROM PUBLIC, anon, authenticated;
 
--- Bloquear UPDATE direto na tabela estoques (Alterações de saldo DEVEM obrigatoriamente usar RPCs atômicas)
--- INSERT é mantido estritamente para inicialização de registro com saldo 0 na criação de novos produtos.
-REVOKE UPDATE ON public.estoques FROM PUBLIC, anon, authenticated;
 GRANT SELECT, INSERT ON public.estoques TO authenticated;
+GRANT SELECT ON public.estoques TO anon;
 
 -- RPC Transacional Atômico para Ajuste de Estoque
 -- RPC Transacional Atômico para Ajuste de Estoque (Endurecido - P0 Autorização & Concorrência)

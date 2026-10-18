@@ -79,8 +79,9 @@ def test_validar_sintaxe_sql_auth_jwt():
     assert "ajustar_estoque_rpc" in content, "Função RPC transacional ajustar_estoque_rpc ausente!"
     assert "pg_advisory_xact_lock" in content, "Bloqueio de concorrência por chave pg_advisory_xact_lock ausente!"
     assert "Leitura Inativos Estrita por Filial" in content, "Política RLS de Leitura Inativos Estrita por Filial ausente!"
+    assert "REVOKE UPDATE (id, filial_id, produto_id, quantidade, status, updated_at) ON public.estoques" in content, "Revogação de UPDATE por coluna em estoques ausente!"
     assert "FOR UPDATE;" in content, "Bloqueio de linha FOR UPDATE para prevenir concorrência e execuções duplicadas ausente no RPC!"
-    print("[TESTE ESTÁTICO SQL APROVADO] Sintaxe 'auth.jwt()', SET search_path = '', RPCs transacionais com FOR UPDATE e advisory lock validados.")
+    print("[TESTE ESTÁTICO SQL APROVADO] Sintaxe 'auth.jwt()', SET search_path = '', REVOKE UPDATE por coluna em estoques, RPCs transacionais e advisory lock validados.")
 
 def main():
     print("=== INICIANDO EXECUÇÃO DA MATRIZ DE TESTES DE SEGURANÇA ST-01 A ST-10 ===")

@@ -196,9 +196,8 @@ CREATE TABLE IF NOT EXISTS public.produtos_filiais_inativos (
 
 ALTER TABLE public.produtos_filiais_inativos ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY "Leitura Inativos por Perfil Filial" ON public.produtos_filiais_inativos
+CREATE POLICY "Leitura Inativos Estrita por Filial" ON public.produtos_filiais_inativos
 FOR SELECT USING (
-  public.get_auth_user_cargo() = 'gerente' OR
   filial_id = public.get_auth_user_filial_id()
 );
 

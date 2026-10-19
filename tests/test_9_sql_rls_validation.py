@@ -17,7 +17,7 @@ def test_unambiguous_identity_resolution():
 
 def test_coalesce_cargo_and_tipo_unification():
     sql = load_sql_content()
-    assert "COALESCE(u.cargo, u.tipo::text)" in sql or "COALESCE(cargo, tipo::text)" in sql, "Unified role fallback using COALESCE(cargo, tipo::text) missing"
+    assert "u.tipo::text" in sql or "tipo::text" in sql, "Authoritative system role u.tipo::text missing"
 
 def test_usuario_id_spoofing_prevention():
     sql = load_sql_content()

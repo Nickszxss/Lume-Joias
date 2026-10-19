@@ -418,70 +418,34 @@ const api = {
 
     const client = getSupabaseClient();
     if (client) {
-      const skuBase = dados.sku || obterSkuPorNome(dados.nome);
-      let codigoFinal = skuBase;
+      const idempotencyKey = dados.idempotencyKey || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `produto-${Date.now()}-${Math.random()}`);
 
-      const { data: prodsExistentes, error: pExistErr } = await client.from('produtos').select('codigo');
-      if (pExistErr) {
-        throw new Error(pExistErr.message || 'Erro ao verificar códigos de produto existentes.');
+      const { data, error } = await client.rpc('cadastrar_produto_com_estoques_rpc', {
+        p_nome: dados.nome.trim(),
+        p_sku: dados.sku.trim(),
+        p_categoria: dados.categoria || 'Geral',
+        p_qtd_minima: dados.qtd_minima ?? 10,
+        p_idempotency_key: idempotencyKey
+      });
+
+      if (error) {
+        throw new Error(error.message || 'Erro ao cadastrar produto no Supabase.');
       }
 
-      if (prodsExistentes && prodsExistentes.length > 0) {
-        const codigosEmUso = new Set(prodsExistentes.map(p => p.codigo));
-        if (codigosEmUso.has(skuBase)) {
-          let contador = 1;
-          while (codigosEmUso.has(`${skuBase}-${contador}`)) {
-            contador++;
-          }
-          codigoFinal = `${skuBase}-${contador}`;
-        }
+      if (!data || data.success !== true) {
+        throw new Error((data && data.message) ? data.message : 'Não foi possível cadastrar o produto.');
       }
 
-      const payloadProduto = {
-        nome: dados.nome,
-        codigo: codigoFinal,
-        descricao: dados.categoria || 'Geral',
-        qtd_minima: dados.qtd_minima ?? 10,
-        unidade_medida: 'unidade',
-        ativo: true
+      const prodId = data.produto_id;
+      notificarRealtime('produtos', { id: prodId });
+      notificarRealtime('estoques', { produto_id: prodId });
+      return {
+        id: prodId,
+        sku: data.sku,
+        nome: data.nome,
+        categoria: dados.categoria || 'Geral',
+        qtd_minima: dados.qtd_minima ?? 10
       };
-
-      const { data: pData, error: pErr } = await client.from('produtos').insert([payloadProduto]).select().single();
-      if (pErr) {
-        if (pErr.code === '23505' || pErr.status === 409) {
-          throw new Error('Não foi possível cadastrar o produto porque o código informado já está em uso. Tente novamente com um código exclusivo.');
-        }
-        throw new Error(pErr.message || 'Erro ao cadastrar produto no Supabase.');
-      }
-
-      if (pData) {
-        const prodId = pData.id;
-        const targetFilialId = parseInt(dados.filialId);
-        const initialQtd = 0;
-        const st = 'zerado';
-
-        const estoqueRecord = {
-          produto_id: prodId,
-          filial_id: targetFilialId,
-          quantidade: initialQtd,
-          status: st
-        };
-        const { error: estErr } = await client.from('estoques').insert([estoqueRecord]);
-        if (estErr) {
-          console.warn('Não foi possível inserir estoque inicial para o novo produto:', estErr.message);
-        }
-
-        notificarRealtime('produtos', { id: prodId });
-        notificarRealtime('estoques', { produto_id: prodId, filial_id: targetFilialId });
-        return {
-          id: prodId,
-          sku: codigoFinal,
-          nome: dados.nome,
-          categoria: dados.categoria || 'Geral',
-          qtd_minima: dados.qtd_minima ?? 10,
-          filial_id: targetFilialId
-        };
-      }
     }
     return apiRequest('/produtos', { method: 'POST', body: JSON.stringify(dados) });
   },
@@ -512,12 +476,14 @@ const api = {
 
     const client = getSupabaseClient();
     if (client) {
+      const idempotencyKey = dados.idempotencyKey || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `ajustar-${Date.now()}-${Math.random()}`);
       const { data, error } = await client.rpc('ajustar_estoque_rpc', {
         p_produto_id: parseInt(dados.produtoId),
         p_filial_id: parseInt(dados.filialId),
         p_tipo: dados.tipo,
         p_quantidade: parseInt(dados.quantidade),
-        p_motivo: dados.motivo || 'Ajuste manual'
+        p_motivo: dados.motivo || 'Ajuste manual',
+        p_idempotency_key: idempotencyKey
       });
 
       if (error) {
@@ -696,43 +662,26 @@ const api = {
 
     const client = getSupabaseClient();
     if (client) {
-      const payloadPedido = {
-        filial_id: dados.filialId,
-        usuario_id: usuario ? usuario.id : null,
-        status: 'aberto',
-        created_at: new Date().toISOString()
-      };
+      const idempotencyKey = dados.idempotencyKey || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `pedido-${Date.now()}-${Math.random()}`);
+      const { data, error } = await client.rpc('criar_pedido_compra_rpc', {
+        p_filial_id: parseInt(dados.filialId),
+        p_produto_id: parseInt(dados.produtoId),
+        p_quantidade: parseInt(dados.quantidade),
+        p_idempotency_key: idempotencyKey
+      });
 
-      const { data: pedido, error: pErr } = await client
-        .from('pedidos_compra')
-        .insert([payloadPedido])
-        .select()
-        .single();
-
-      if (pErr || !pedido) {
-        throw new Error(pErr?.message || 'Erro ao criar registro do pedido de compra.');
+      if (error) {
+        throw new Error(error.message || 'Erro ao criar pedido de compra.');
       }
 
-      const payloadItem = {
-        pedido_id: pedido.id,
-        produto_id: dados.produtoId,
-        quantidade: dados.quantidade
-      };
-
-      const { data: item, error: iErr } = await client
-        .from('itens_pedido_compra')
-        .insert([payloadItem])
-        .select()
-        .single();
-
-      if (iErr) {
-        await client.from('pedidos_compra').delete().eq('id', pedido.id);
-        throw new Error(iErr.message || 'Erro ao gravar os itens do pedido de compra.');
+      if (!data || data.success !== true) {
+        throw new Error((data && data.message) ? data.message : 'Não foi possível criar o pedido de compra.');
       }
 
-      notificarRealtime('pedidos_compra', { id: pedido.id });
+      const pedidoId = data.pedido_id;
+      notificarRealtime('pedidos_compra', { id: pedidoId });
       return {
-        id: pedido.id,
+        id: pedidoId,
         produto_id: dados.produtoId,
         produtoNome: nomeProduto(dados.produtoId),
         quantidade: dados.quantidade,
@@ -960,6 +909,9 @@ let chartFilial = null, chartMov = null;
 let filialDashSel = null, filialEstoqueSel = null;
 let ajusteTarget = null;
 let realtimeChannel = null;
+let ajusteIdempotencyKey = null;
+let pedidoIdempotencyKey = null;
+let produtoIdempotencyKey = null;
 
 // ---------- REALTIME SUBSCRIPTIONS (SUPABASE REALTIME) ----------
 function notificarRealtime(tabela, dados = {}) {
@@ -1646,9 +1598,17 @@ const MAPA_CATEGORIAS_OFICIAIS = {
 };
 
 function obterCategoriaPorNome(nome) {
-  if (!nome) return 'ANEL';
+  if (!nome || typeof nome !== 'string') {
+    throw new Error('Nome do produto é obrigatório.');
+  }
   const nomeLower = nome.trim().toLowerCase();
-  return MAPA_CATEGORIAS_OFICIAIS[nomeLower] || 'ANEL';
+  if (nomeLower.includes('anel')) return 'ANEL';
+  if (nomeLower.includes('pulseira')) return 'PULSEIRA';
+  if (nomeLower.includes('solitária') || nomeLower.includes('solitaria')) return 'SOLITARIA';
+  if (nomeLower.includes('colar')) return 'COLAR';
+  if (nomeLower.includes('brinco')) return 'BRINCO';
+
+  throw new Error('Nome do produto deve corresponder a uma categoria permitida (Anel, Pulseira, Solitária, Colar, Brinco).');
 }
 
 function obterSkuPorNome(nome) {
@@ -1667,7 +1627,13 @@ function atualizarSkuPorTipo() {
   if (pNome) {
     const tipo = pNome.value;
     if (pSku) pSku.value = obterSkuPorNome(tipo);
-    if (pCat) pCat.value = obterCategoriaPorNome(tipo);
+    if (pCat) {
+      try {
+        pCat.value = obterCategoriaPorNome(tipo);
+      } catch (_) {
+        pCat.value = '—';
+      }
+    }
   }
 }
 
@@ -1685,6 +1651,8 @@ function abrirModalProduto(){
     }
   }
 
+  produtoIdempotencyKey = (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `produto-${Date.now()}-${Math.random()}`);
+
   atualizarSkuPorTipo();
 
   const overlay = $('modal-overlay');
@@ -1699,19 +1667,27 @@ async function salvarProduto(){
 
   const nome = $('p-nome') ? $('p-nome').value.trim() : '';
   const sku = $('p-sku') ? $('p-sku').value.trim() : '';
-  const categoria = obterCategoriaPorNome(nome);
-  const filialId = parseInt($('p-filial') ? $('p-filial').value : 0);
   const minRaw = $('p-min') ? $('p-min').value : '10';
   const qtd_minima = parseInt(minRaw);
 
   if(!nome || !sku){ toast('Preencha Nome e SKU.', true); return; }
-  if(!filialId){ toast('Selecione uma filial obrigatória.', true); return; }
   if(!Number.isInteger(qtd_minima) || qtd_minima < 0){ toast('Estoque mínimo deve ser um número inteiro válido.', true); return; }
 
   if (saveBtn) saveBtn.disabled = true;
 
   try {
-    await api.criarProduto({ nome, sku, categoria, filialId, qtd_minima });
+    const categoria = obterCategoriaPorNome(nome);
+    if (!produtoIdempotencyKey) {
+      produtoIdempotencyKey = (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `produto-${Date.now()}-${Math.random()}`);
+    }
+    await api.criarProduto({
+      nome,
+      sku,
+      categoria,
+      qtd_minima,
+      idempotencyKey: produtoIdempotencyKey
+    });
+    produtoIdempotencyKey = null;
     fecharModal();
     toast('Produto adicionado com sucesso!');
     renderProdutos();
@@ -1772,6 +1748,7 @@ function pintarEstoque(){
   tb.innerHTML = list.map(e => {
     const p = produtos.find(prd => String(prd.id) === String(e.produto_id)) || {};
     const st = statusEstoque(e.quantidade);
+    const podeAjustar = !(usuario && usuario.tipo === 'funcionario' && usuario.filial_id && e.filial_id != usuario.filial_id);
     return `
       <tr>
         <td><code>${escapeHtml(p.sku ?? '—')}</code></td>
@@ -1779,9 +1756,46 @@ function pintarEstoque(){
         <td>${escapeHtml(nomeFilial(e.filial_id))}</td>
         <td>${e.quantidade}</td>
         <td><span class="badge ${st==='zerado'?'danger':'ok'}">${STATUS_LABEL[st]}</span></td>
-        <td><button class="btn-sm btn-secondary" onclick="abrirModalAjuste(${e.produto_id}, ${e.filial_id})">Ajustar</button></td>
+        <td>
+          <button class="btn-sm btn-secondary" onclick="abrirModalAjuste(${e.produto_id}, ${e.filial_id})">Ajustar</button>
+          <button class="btn-sm btn-primary btn-mais-dez" style="margin-left:4px;" ${podeAjustar ? '' : 'disabled title="Apenas funcionários desta filial podem ajustar o estoque"'} onclick="adicionarMaisDezEstoque(${e.produto_id}, ${e.filial_id}, this)">+10</button>
+        </td>
       </tr>`;
   }).join('');
+}
+
+async function adicionarMaisDezEstoque(produtoId, filialId, btn) {
+  if (usuario && usuario.tipo === 'funcionario' && usuario.filial_id && filialId != usuario.filial_id) {
+    toast('Acesso negado: Funcionário só pode alterar o estoque da sua própria filial.', true);
+    return;
+  }
+
+  if (btn) {
+    if (btn.disabled) return;
+    btn.disabled = true;
+    btn.textContent = '+10...';
+  }
+
+  try {
+    const idempotencyKey = (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `mais10-${Date.now()}-${Math.random()}`);
+    await api.ajustarEstoque({
+      produtoId: parseInt(produtoId),
+      filialId: parseInt(filialId),
+      tipo: 'entrada',
+      quantidade: 10,
+      motivo: 'Aumento rápido de estoque (+10)',
+      idempotencyKey: idempotencyKey
+    });
+    toast('Adicionado +10 unidades ao estoque com sucesso!');
+    renderEstoque();
+  } catch (err) {
+    toast(err.message || 'Não foi possível adicionar +10 unidades ao estoque.', true);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = '+10';
+    }
+  }
 }
 
 function abrirModalAjuste(pid, fid){
@@ -1790,6 +1804,7 @@ function abrirModalAjuste(pid, fid){
     return;
   }
   ajusteTarget = {pid, fid};
+  ajusteIdempotencyKey = (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `ajustar-${Date.now()}-${Math.random()}`);
   const titulo = $('ajuste-titulo');
   if (titulo) titulo.textContent = `Ajustar: ${nomeProduto(pid)} (${nomeFilial(fid)})`;
 
@@ -1812,17 +1827,26 @@ async function salvarAjuste(){
     toast('Informe uma quantidade inteira válida maior que zero.', true);
     return;
   }
+  if (!motivo) {
+    toast('O motivo do ajuste de estoque é obrigatório.', true);
+    return;
+  }
 
   if (saveBtn) saveBtn.disabled = true;
 
   try {
+    if (!ajusteIdempotencyKey) {
+      ajusteIdempotencyKey = (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `ajustar-${Date.now()}-${Math.random()}`);
+    }
     await api.ajustarEstoque({
       produtoId: ajusteTarget.pid,
       filialId: ajusteTarget.fid,
       tipo, quantidade,
       motivo: motivo || 'Ajuste manual',
-      usuario: usuario ? usuario.nome : 'Usuário'
+      usuario: usuario ? usuario.nome : 'Usuário',
+      idempotencyKey: ajusteIdempotencyKey
     });
+    ajusteIdempotencyKey = null;
     fecharModal();
     toast('Estoque atualizado!');
     irPara('estoque');
@@ -2057,6 +2081,8 @@ async function abrirModalPedido(){
   const produtosAtivos = produtos.filter(p => p.ativo !== false);
   if(produtosAtivos.length === 0){ toast('Nenhum produto ativo disponível para criação de pedidos.', true); return; }
 
+  pedidoIdempotencyKey = (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `pedido-${Date.now()}-${Math.random()}`);
+
   const pcp = $('pc-produto');
   if (pcp) pcp.innerHTML = produtosAtivos.map(p=>`<option value="${p.id}">${escapeHtml(p.nome)}</option>`).join('');
 
@@ -2091,7 +2117,17 @@ async function salvarPedido(){
   if (saveBtn) saveBtn.disabled = true;
 
   try {
-    await api.criarPedido({ produtoId, filialId, quantidade, solicitante: usuario ? usuario.nome : 'Gerente' });
+    if (!pedidoIdempotencyKey) {
+      pedidoIdempotencyKey = (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `pedido-${Date.now()}-${Math.random()}`);
+    }
+    await api.criarPedido({
+      produtoId,
+      filialId,
+      quantidade,
+      solicitante: usuario ? usuario.nome : 'Gerente',
+      idempotencyKey: pedidoIdempotencyKey
+    });
+    pedidoIdempotencyKey = null;
     fecharModal();
     toast('Pedido de compra criado com sucesso!');
     renderPedidos();

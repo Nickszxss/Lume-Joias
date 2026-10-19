@@ -212,7 +212,7 @@ BEGIN
 END $$;
 
 -- 4. REVOGAÇÃO RIGOROSA DE PRIVILÉGIOS RESIDUAIS SOBRE TABELAS E SEQUÊNCIAS DO PROJETO
-REVOKE ALL ON public.usuarios, public.filiais, public.produtos, public.estoques, public.movimentacoes, public.transferencias, public.pedidos_compra, public.itens_pedido_compra, public.produtos_filiais_inativos FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON public.usuarios, public.filiais, public.produtos, public.estoques, public.movimentacoes, public.transferencias, public.pedidos_compra, public.itens_pedido_compra, public.produtos_filiais_inativos, public.idempotencia_chaves FROM PUBLIC, anon, authenticated;
 
 -- Permissões estritas EXCLUSIVAMENTE em sequências vinculadas a colunas das 9 tabelas do Lume-Joias
 DO $$
@@ -399,23 +399,32 @@ BEGIN
   END IF;
 
   -- Checagem de Idempotência
-  IF p_idempotency_key IS NOT NULL AND TRIM(p_idempotency_key) != '' THEN
-    PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtext('idempotency:' || p_idempotency_key));
-    v_params_hash := md5('ajustar_estoque:' || COALESCE(p_produto_id::text, '') || ':' || COALESCE(p_filial_id::text, '') || ':' || COALESCE(p_tipo, '') || ':' || COALESCE(p_quantidade::text, '') || ':' || COALESCE(p_motivo, ''));
+  IF p_idempotency_key IS NULL OR TRIM(p_idempotency_key) = '' THEN
+    RAISE EXCEPTION 'Operacao negada: Chave de idempotencia e obrigatoria para esta operacao.';
+  END IF;
 
-    SELECT * INTO v_idempotent_rec
-    FROM public.idempotencia_chaves
-    WHERE chave = p_idempotency_key;
+  IF LENGTH(p_idempotency_key) > 255 THEN
+    RAISE EXCEPTION 'Operacao negada: Chave de idempotencia excede o tamanho maximo permitido (255 caracteres).';
+  END IF;
 
-    IF FOUND THEN
-      IF v_idempotent_rec.usuario_id != v_user_id THEN
-        RAISE EXCEPTION 'Acesso negado: A chave de idempotencia % pertence a outro usuario.', p_idempotency_key;
-      END IF;
-      IF v_idempotent_rec.parametros_hash = v_params_hash THEN
-        RETURN v_idempotent_rec.resultado_json;
-      ELSE
-        RAISE EXCEPTION 'Operacao negada: A chave de idempotencia % ja foi utilizada com parametros diferentes.', p_idempotency_key;
-      END IF;
+  PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtext('idempotency:' || p_idempotency_key));
+  v_params_hash := md5('ajustar_estoque:' || COALESCE(p_produto_id::text, '') || ':' || COALESCE(p_filial_id::text, '') || ':' || COALESCE(p_tipo, '') || ':' || COALESCE(p_quantidade::text, '') || ':' || COALESCE(p_motivo, ''));
+
+  SELECT * INTO v_idempotent_rec
+  FROM public.idempotencia_chaves
+  WHERE chave = p_idempotency_key;
+
+  IF FOUND THEN
+    IF v_idempotent_rec.usuario_id IS DISTINCT FROM v_user_id THEN
+      RAISE EXCEPTION 'Acesso negado: A chave de idempotencia % pertence a outro usuario.', p_idempotency_key;
+    END IF;
+    IF v_idempotent_rec.escopo IS DISTINCT FROM 'ajustar_estoque' THEN
+      RAISE EXCEPTION 'Operacao negada: A chave de idempotencia % ja foi utilizada em outro escopo (%).', p_idempotency_key, v_idempotent_rec.escopo;
+    END IF;
+    IF v_idempotent_rec.parametros_hash = v_params_hash THEN
+      RETURN v_idempotent_rec.resultado_json;
+    ELSE
+      RAISE EXCEPTION 'Operacao negada: A chave de idempotencia % ja foi utilizada com parametros diferentes.', p_idempotency_key;
     END IF;
   END IF;
 
@@ -599,23 +608,32 @@ BEGIN
   WHERE auth_user_id = v_auth_uid AND ativo = true;
 
   -- Checagem de Idempotência
-  IF p_idempotency_key IS NOT NULL AND TRIM(p_idempotency_key) != '' THEN
-    PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtext('idempotency:' || p_idempotency_key));
-    v_params_hash := md5('concluir_transferencia:' || COALESCE(p_transferencia_id::text, '') || ':' || COALESCE(p_observacao, ''));
+  IF p_idempotency_key IS NULL OR TRIM(p_idempotency_key) = '' THEN
+    RAISE EXCEPTION 'Operacao negada: Chave de idempotencia e obrigatoria para esta operacao.';
+  END IF;
 
-    SELECT * INTO v_idempotent_rec
-    FROM public.idempotencia_chaves
-    WHERE chave = p_idempotency_key;
+  IF LENGTH(p_idempotency_key) > 255 THEN
+    RAISE EXCEPTION 'Operacao negada: Chave de idempotencia excede o tamanho maximo permitido (255 caracteres).';
+  END IF;
 
-    IF FOUND THEN
-      IF v_idempotent_rec.usuario_id != v_user_id THEN
-        RAISE EXCEPTION 'Acesso negado: A chave de idempotencia % pertence a outro usuario.', p_idempotency_key;
-      END IF;
-      IF v_idempotent_rec.parametros_hash = v_params_hash THEN
-        RETURN v_idempotent_rec.resultado_json;
-      ELSE
-        RAISE EXCEPTION 'Operacao negada: A chave de idempotencia % ja foi utilizada com parametros diferentes.', p_idempotency_key;
-      END IF;
+  PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtext('idempotency:' || p_idempotency_key));
+  v_params_hash := md5('concluir_transferencia:' || COALESCE(p_transferencia_id::text, '') || ':' || COALESCE(p_observacao, ''));
+
+  SELECT * INTO v_idempotent_rec
+  FROM public.idempotencia_chaves
+  WHERE chave = p_idempotency_key;
+
+  IF FOUND THEN
+    IF v_idempotent_rec.usuario_id IS DISTINCT FROM v_user_id THEN
+      RAISE EXCEPTION 'Acesso negado: A chave de idempotencia % pertence a outro usuario.', p_idempotency_key;
+    END IF;
+    IF v_idempotent_rec.escopo IS DISTINCT FROM 'concluir_transferencia' THEN
+      RAISE EXCEPTION 'Operacao negada: A chave de idempotencia % ja foi utilizada em outro escopo (%).', p_idempotency_key, v_idempotent_rec.escopo;
+    END IF;
+    IF v_idempotent_rec.parametros_hash = v_params_hash THEN
+      RETURN v_idempotent_rec.resultado_json;
+    ELSE
+      RAISE EXCEPTION 'Operacao negada: A chave de idempotencia % ja foi utilizada com parametros diferentes.', p_idempotency_key;
     END IF;
   END IF;
 
@@ -647,6 +665,10 @@ BEGIN
 
   IF v_transf.quantidade <= 0 THEN
     RAISE EXCEPTION 'Operacao negada: Quantidade da transferencia invalida (%).', v_transf.quantidade;
+  END IF;
+
+  IF COALESCE(v_user_cargo, '') NOT IN ('gerente', 'funcionario') THEN
+    RAISE EXCEPTION 'Acesso negado: Perfil de usuario invalido para esta operacao.';
   END IF;
 
   IF v_user_cargo != 'gerente' AND (v_user_filial_id IS NULL OR v_user_filial_id != v_transf.destino_id) THEN
@@ -838,23 +860,32 @@ BEGIN
   WHERE auth_user_id = v_auth_uid AND ativo = true;
 
   -- Checagem de Idempotência
-  IF p_idempotency_key IS NOT NULL AND TRIM(p_idempotency_key) != '' THEN
-    PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtext('idempotency:' || p_idempotency_key));
-    v_params_hash := md5('receber_pedido:' || COALESCE(p_pedido_id::text, '') || ':' || COALESCE(p_observacao, ''));
+  IF p_idempotency_key IS NULL OR TRIM(p_idempotency_key) = '' THEN
+    RAISE EXCEPTION 'Operacao negada: Chave de idempotencia e obrigatoria para esta operacao.';
+  END IF;
 
-    SELECT * INTO v_idempotent_rec
-    FROM public.idempotencia_chaves
-    WHERE chave = p_idempotency_key;
+  IF LENGTH(p_idempotency_key) > 255 THEN
+    RAISE EXCEPTION 'Operacao negada: Chave de idempotencia excede o tamanho maximo permitido (255 caracteres).';
+  END IF;
 
-    IF FOUND THEN
-      IF v_idempotent_rec.usuario_id != v_user_id THEN
-        RAISE EXCEPTION 'Acesso negado: A chave de idempotencia % pertence a outro usuario.', p_idempotency_key;
-      END IF;
-      IF v_idempotent_rec.parametros_hash = v_params_hash THEN
-        RETURN v_idempotent_rec.resultado_json;
-      ELSE
-        RAISE EXCEPTION 'Operacao negada: A chave de idempotencia % ja foi utilizada com parametros diferentes.', p_idempotency_key;
-      END IF;
+  PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtext('idempotency:' || p_idempotency_key));
+  v_params_hash := md5('receber_pedido:' || COALESCE(p_pedido_id::text, '') || ':' || COALESCE(p_observacao, ''));
+
+  SELECT * INTO v_idempotent_rec
+  FROM public.idempotencia_chaves
+  WHERE chave = p_idempotency_key;
+
+  IF FOUND THEN
+    IF v_idempotent_rec.usuario_id IS DISTINCT FROM v_user_id THEN
+      RAISE EXCEPTION 'Acesso negado: A chave de idempotencia % pertence a outro usuario.', p_idempotency_key;
+    END IF;
+    IF v_idempotent_rec.escopo IS DISTINCT FROM 'receber_pedido' THEN
+      RAISE EXCEPTION 'Operacao negada: A chave de idempotencia % ja foi utilizada em outro escopo (%).', p_idempotency_key, v_idempotent_rec.escopo;
+    END IF;
+    IF v_idempotent_rec.parametros_hash = v_params_hash THEN
+      RETURN v_idempotent_rec.resultado_json;
+    ELSE
+      RAISE EXCEPTION 'Operacao negada: A chave de idempotencia % ja foi utilizada com parametros diferentes.', p_idempotency_key;
     END IF;
   END IF;
 
@@ -880,7 +911,11 @@ BEGIN
     RAISE EXCEPTION 'Operacao negada: Pedido ID % possui status invalido (%) para recebimento.', p_pedido_id, v_pedido.status;
   END IF;
 
-  IF v_user_filial_id IS NULL OR v_user_filial_id != v_pedido.filial_id THEN
+  IF COALESCE(v_user_cargo, '') NOT IN ('gerente', 'funcionario') THEN
+    RAISE EXCEPTION 'Acesso negado: Perfil de usuario invalido para esta operacao.';
+  END IF;
+
+  IF v_user_cargo != 'gerente' AND (v_user_filial_id IS NULL OR v_user_filial_id != v_pedido.filial_id) THEN
     RAISE EXCEPTION 'Acesso negado: Usuario nao possui permissao para receber pedidos de outra filial (Filial do Pedido: %, Sua Filial: %).', v_pedido.filial_id, v_user_filial_id;
   END IF;
 
@@ -1008,20 +1043,32 @@ BEGIN
   END IF;
 
   -- Checagem de Idempotência
-  IF p_idempotency_key IS NOT NULL AND TRIM(p_idempotency_key) != '' THEN
-    PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtext('idempotency:' || p_idempotency_key));
-    v_params_hash := md5('criar_pedido:' || COALESCE(p_filial_id::text, '') || ':' || COALESCE(p_produto_id::text, '') || ':' || COALESCE(p_quantidade::text, ''));
+  IF p_idempotency_key IS NULL OR TRIM(p_idempotency_key) = '' THEN
+    RAISE EXCEPTION 'Operacao negada: Chave de idempotencia e obrigatoria para esta operacao.';
+  END IF;
 
-    SELECT * INTO v_idempotent_rec
-    FROM public.idempotencia_chaves
-    WHERE chave = p_idempotency_key;
+  IF LENGTH(p_idempotency_key) > 255 THEN
+    RAISE EXCEPTION 'Operacao negada: Chave de idempotencia excede o tamanho maximo permitido (255 caracteres).';
+  END IF;
 
-    IF FOUND THEN
-      IF v_idempotent_rec.parametros_hash = v_params_hash THEN
-        RETURN v_idempotent_rec.resultado_json;
-      ELSE
-        RAISE EXCEPTION 'Operacao negada: A chave de idempotencia % ja foi utilizada com parametros diferentes.', p_idempotency_key;
-      END IF;
+  PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtext('idempotency:' || p_idempotency_key));
+  v_params_hash := md5('criar_pedido:' || COALESCE(p_filial_id::text, '') || ':' || COALESCE(p_produto_id::text, '') || ':' || COALESCE(p_quantidade::text, ''));
+
+  SELECT * INTO v_idempotent_rec
+  FROM public.idempotencia_chaves
+  WHERE chave = p_idempotency_key;
+
+  IF FOUND THEN
+    IF v_idempotent_rec.usuario_id IS DISTINCT FROM v_user_id THEN
+      RAISE EXCEPTION 'Acesso negado: A chave de idempotencia % pertence a outro usuario.', p_idempotency_key;
+    END IF;
+    IF v_idempotent_rec.escopo IS DISTINCT FROM 'criar_pedido' THEN
+      RAISE EXCEPTION 'Operacao negada: A chave de idempotencia % ja foi utilizada em outro escopo (%).', p_idempotency_key, v_idempotent_rec.escopo;
+    END IF;
+    IF v_idempotent_rec.parametros_hash = v_params_hash THEN
+      RETURN v_idempotent_rec.resultado_json;
+    ELSE
+      RAISE EXCEPTION 'Operacao negada: A chave de idempotencia % ja foi utilizada com parametros diferentes.', p_idempotency_key;
     END IF;
   END IF;
 
@@ -1110,20 +1157,32 @@ BEGIN
   END IF;
 
   -- Checagem de Idempotência
-  IF p_idempotency_key IS NOT NULL AND TRIM(p_idempotency_key) != '' THEN
-    PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtext('idempotency:' || p_idempotency_key));
-    v_params_hash := md5('cadastrar_produto:' || TRIM(p_nome) || ':' || TRIM(p_sku) || ':' || COALESCE(p_categoria, 'Geral') || ':' || p_qtd_minima::text);
+  IF p_idempotency_key IS NULL OR TRIM(p_idempotency_key) = '' THEN
+    RAISE EXCEPTION 'Operacao negada: Chave de idempotencia e obrigatoria para esta operacao.';
+  END IF;
 
-    SELECT * INTO v_idempotent_rec
-    FROM public.idempotencia_chaves
-    WHERE chave = p_idempotency_key;
+  IF LENGTH(p_idempotency_key) > 255 THEN
+    RAISE EXCEPTION 'Operacao negada: Chave de idempotencia excede o tamanho maximo permitido (255 caracteres).';
+  END IF;
 
-    IF FOUND THEN
-      IF v_idempotent_rec.parametros_hash = v_params_hash THEN
-        RETURN v_idempotent_rec.resultado_json;
-      ELSE
-        RAISE EXCEPTION 'Operacao negada: A chave de idempotencia % ja foi utilizada com parametros diferentes.', p_idempotency_key;
-      END IF;
+  PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtext('idempotency:' || p_idempotency_key));
+  v_params_hash := md5('cadastrar_produto:' || TRIM(p_nome) || ':' || TRIM(p_sku) || ':' || COALESCE(p_categoria, 'Geral') || ':' || p_qtd_minima::text);
+
+  SELECT * INTO v_idempotent_rec
+  FROM public.idempotencia_chaves
+  WHERE chave = p_idempotency_key;
+
+  IF FOUND THEN
+    IF v_idempotent_rec.usuario_id IS DISTINCT FROM v_user_id THEN
+      RAISE EXCEPTION 'Acesso negado: A chave de idempotencia % pertence a outro usuario.', p_idempotency_key;
+    END IF;
+    IF v_idempotent_rec.escopo IS DISTINCT FROM 'cadastrar_produto' THEN
+      RAISE EXCEPTION 'Operacao negada: A chave de idempotencia % ja foi utilizada em outro escopo (%).', p_idempotency_key, v_idempotent_rec.escopo;
+    END IF;
+    IF v_idempotent_rec.parametros_hash = v_params_hash THEN
+      RETURN v_idempotent_rec.resultado_json;
+    ELSE
+      RAISE EXCEPTION 'Operacao negada: A chave de idempotencia % ja foi utilizada com parametros diferentes.', p_idempotency_key;
     END IF;
   END IF;
 

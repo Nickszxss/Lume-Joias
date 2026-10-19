@@ -918,6 +918,48 @@ let pedidoIdempotencyKey = null;
 let produtoIdempotencyKey = null;
 let concluirTransfKeysMap = {};
 let receberPedidoKeysMap = {};
+let ajusteMaisDezKeysMap = {};
+
+function ObterChaveIdempotenciaFrontend(escopo, id, inMemoryMap) {
+  const userId = (typeof usuario !== 'undefined' && usuario) ? usuario.id : 'anon';
+  const storageKey = `lume_idempotency_${userId}_${escopo}_${id}`;
+  if (inMemoryMap && inMemoryMap[id]) {
+    return inMemoryMap[id];
+  }
+  try {
+    if (typeof sessionStorage !== 'undefined') {
+      const savedKey = sessionStorage.getItem(storageKey);
+      if (savedKey) {
+        if (inMemoryMap) inMemoryMap[id] = savedKey;
+        return savedKey;
+      }
+    }
+  } catch (e) {}
+  const newKey = (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `${escopo}-${id}-${Date.now()}-${Math.random()}`);
+  if (inMemoryMap) inMemoryMap[id] = newKey;
+  try {
+    if (typeof sessionStorage !== 'undefined') {
+      sessionStorage.setItem(storageKey, newKey);
+    }
+  } catch (e) {}
+  return newKey;
+}
+
+function LimparChaveIdempotenciaFrontend(escopo, id, inMemoryMap) {
+  const userId = (typeof usuario !== 'undefined' && usuario) ? usuario.id : 'anon';
+  const storageKey = `lume_idempotency_${userId}_${escopo}_${id}`;
+  if (inMemoryMap) {
+    delete inMemoryMap[id];
+  }
+  delete concluirTransfKeysMap[id];
+  delete receberPedidoKeysMap[id];
+  delete ajusteMaisDezKeysMap[id];
+  try {
+    if (typeof sessionStorage !== 'undefined') {
+      sessionStorage.removeItem(storageKey);
+    }
+  } catch (e) {}
+}
 
 // ---------- REALTIME SUBSCRIPTIONS (SUPABASE REALTIME) ----------
 function notificarRealtime(tabela, dados = {}) {
@@ -1783,7 +1825,7 @@ async function adicionarMaisDezEstoque(produtoId, filialId, btn) {
   }
 
   try {
-    const idempotencyKey = (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `mais10-${Date.now()}-${Math.random()}`);
+    const idempotencyKey = ObterChaveIdempotenciaFrontend('ajustar_estoque', `mais10_${produtoId}_${filialId}`, ajusteMaisDezKeysMap);
     await api.ajustarEstoque({
       produtoId: parseInt(produtoId),
       filialId: parseInt(filialId),
@@ -1792,6 +1834,7 @@ async function adicionarMaisDezEstoque(produtoId, filialId, btn) {
       motivo: 'Aumento rápido de estoque (+10)',
       idempotencyKey: idempotencyKey
     });
+    LimparChaveIdempotenciaFrontend('ajustar_estoque', `mais10_${produtoId}_${filialId}`, ajusteMaisDezKeysMap);
     toast('Adicionado +10 unidades ao estoque com sucesso!');
     renderEstoque();
   } catch (err) {
@@ -1980,13 +2023,10 @@ async function concluirTransf(id, btn){
     btn.textContent = 'Processando...';
   }
   try {
-    if (!concluirTransfKeysMap[id]) {
-      concluirTransfKeysMap[id] = (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `transf-${id}-${Date.now()}-${Math.random()}`);
-    }
-    const idempotencyKey = concluirTransfKeysMap[id];
+    const idempotencyKey = ObterChaveIdempotenciaFrontend('concluir_transferencia', id, concluirTransfKeysMap);
     const res = await api.concluirTransferencia(id, idempotencyKey);
     if (res && res.success === true) {
-      delete concluirTransfKeysMap[id];
+      LimparChaveIdempotenciaFrontend('concluir_transferencia', id, concluirTransfKeysMap);
       toast('Transferência concluída com sucesso!');
       renderTransferencias();
     } else {
@@ -2060,13 +2100,10 @@ async function receberPedido(id, btn){
     btn.textContent = 'Processando...';
   }
   try {
-    if (!receberPedidoKeysMap[id]) {
-      receberPedidoKeysMap[id] = (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `receber-${id}-${Date.now()}-${Math.random()}`);
-    }
-    const idempotencyKey = receberPedidoKeysMap[id];
+    const idempotencyKey = ObterChaveIdempotenciaFrontend('receber_pedido', id, receberPedidoKeysMap);
     const res = await api.receberPedido(id, idempotencyKey);
     if (res && res.success === true) {
-      delete receberPedidoKeysMap[id];
+      LimparChaveIdempotenciaFrontend('receber_pedido', id, receberPedidoKeysMap);
       toast('Pedido de compra marcado como recebido com sucesso!');
       renderPedidos();
     } else {

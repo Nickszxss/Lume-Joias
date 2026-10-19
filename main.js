@@ -593,10 +593,12 @@ const api = {
     return apiRequest('/transferencias', { method: 'POST', body: JSON.stringify(dados) });
   },
 
-  concluirTransferencia: async (id) => {
+  concluirTransferencia: async (id, idempotencyKey = null) => {
     const client = getSupabaseClient();
     if (client) {
-      const { data, error } = await client.rpc('concluir_transferencia_rpc', { p_transferencia_id: id });
+      const payload = { p_transferencia_id: id };
+      if (idempotencyKey) payload.p_idempotency_key = idempotencyKey;
+      const { data, error } = await client.rpc('concluir_transferencia_rpc', payload);
       if (error) {
         throw new Error(error.message || 'Erro ao concluir transferência.');
       }
@@ -695,10 +697,12 @@ const api = {
     return apiRequest('/pedidos', { method: 'POST', body: JSON.stringify(dados) });
   },
 
-  receberPedido: async (id) => {
+  receberPedido: async (id, idempotencyKey = null) => {
     const client = getSupabaseClient();
     if (client) {
-      const { data, error } = await client.rpc('receber_pedido_rpc', { p_pedido_id: id });
+      const payload = { p_pedido_id: id };
+      if (idempotencyKey) payload.p_idempotency_key = idempotencyKey;
+      const { data, error } = await client.rpc('receber_pedido_rpc', payload);
       if (error) {
         throw new Error(error.message || 'Erro ao receber pedido de compra.');
       }
@@ -912,6 +916,8 @@ let realtimeChannel = null;
 let ajusteIdempotencyKey = null;
 let pedidoIdempotencyKey = null;
 let produtoIdempotencyKey = null;
+let concluirTransfKeysMap = {};
+let receberPedidoKeysMap = {};
 
 // ---------- REALTIME SUBSCRIPTIONS (SUPABASE REALTIME) ----------
 function notificarRealtime(tabela, dados = {}) {
@@ -1974,8 +1980,13 @@ async function concluirTransf(id, btn){
     btn.textContent = 'Processando...';
   }
   try {
-    const res = await api.concluirTransferencia(id);
+    if (!concluirTransfKeysMap[id]) {
+      concluirTransfKeysMap[id] = (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `transf-${id}-${Date.now()}-${Math.random()}`);
+    }
+    const idempotencyKey = concluirTransfKeysMap[id];
+    const res = await api.concluirTransferencia(id, idempotencyKey);
     if (res && res.success === true) {
+      delete concluirTransfKeysMap[id];
       toast('Transferência concluída com sucesso!');
       renderTransferencias();
     } else {
@@ -2049,8 +2060,13 @@ async function receberPedido(id, btn){
     btn.textContent = 'Processando...';
   }
   try {
-    const res = await api.receberPedido(id);
+    if (!receberPedidoKeysMap[id]) {
+      receberPedidoKeysMap[id] = (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `receber-${id}-${Date.now()}-${Math.random()}`);
+    }
+    const idempotencyKey = receberPedidoKeysMap[id];
+    const res = await api.receberPedido(id, idempotencyKey);
     if (res && res.success === true) {
+      delete receberPedidoKeysMap[id];
       toast('Pedido de compra marcado como recebido com sucesso!');
       renderPedidos();
     } else {

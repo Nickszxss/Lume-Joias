@@ -408,6 +408,9 @@ BEGIN
     WHERE chave = p_idempotency_key;
 
     IF FOUND THEN
+      IF v_idempotent_rec.usuario_id != v_user_id THEN
+        RAISE EXCEPTION 'Acesso negado: A chave de idempotencia % pertence a outro usuario.', p_idempotency_key;
+      END IF;
       IF v_idempotent_rec.parametros_hash = v_params_hash THEN
         RETURN v_idempotent_rec.resultado_json;
       ELSE
@@ -546,9 +549,12 @@ GRANT SELECT, INSERT ON public.transferencias TO authenticated;
 REVOKE UPDATE ON public.transferencias FROM PUBLIC, anon, authenticated;
 
 -- RPC Transacional Atômico para Conclusão de Transferência
+DROP FUNCTION IF EXISTS public.concluir_transferencia_rpc(bigint, text);
+DROP FUNCTION IF EXISTS public.concluir_transferencia_rpc(bigint, text, text);
 CREATE OR REPLACE FUNCTION public.concluir_transferencia_rpc(
   p_transferencia_id bigint,
-  p_observacao text DEFAULT NULL
+  p_observacao text DEFAULT NULL,
+  p_idempotency_key text DEFAULT NULL
 )
 RETURNS json
 LANGUAGE plpgsql
@@ -569,6 +575,9 @@ DECLARE
   v_dest_qtd_ant integer;
   v_dest_qtd_nova integer;
   v_dest_status text;
+  v_params_hash text;
+  v_idempotent_rec record;
+  v_resultado json;
 BEGIN
   v_auth_uid := auth.uid();
   IF v_auth_uid IS NULL THEN
@@ -588,6 +597,27 @@ BEGIN
   SELECT id, LOWER(tipo::text), filial_id INTO v_user_id, v_user_cargo, v_user_filial_id
   FROM public.usuarios
   WHERE auth_user_id = v_auth_uid AND ativo = true;
+
+  -- Checagem de Idempotência
+  IF p_idempotency_key IS NOT NULL AND TRIM(p_idempotency_key) != '' THEN
+    PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtext('idempotency:' || p_idempotency_key));
+    v_params_hash := md5('concluir_transferencia:' || COALESCE(p_transferencia_id::text, '') || ':' || COALESCE(p_observacao, ''));
+
+    SELECT * INTO v_idempotent_rec
+    FROM public.idempotencia_chaves
+    WHERE chave = p_idempotency_key;
+
+    IF FOUND THEN
+      IF v_idempotent_rec.usuario_id != v_user_id THEN
+        RAISE EXCEPTION 'Acesso negado: A chave de idempotencia % pertence a outro usuario.', p_idempotency_key;
+      END IF;
+      IF v_idempotent_rec.parametros_hash = v_params_hash THEN
+        RETURN v_idempotent_rec.resultado_json;
+      ELSE
+        RAISE EXCEPTION 'Operacao negada: A chave de idempotencia % ja foi utilizada com parametros diferentes.', p_idempotency_key;
+      END IF;
+    END IF;
+  END IF;
 
   -- 1. Bloquear linha da transferencia com SELECT FOR UPDATE
   SELECT * INTO v_transf
@@ -698,12 +728,21 @@ BEGIN
       concluida_at = now()
   WHERE id = p_transferencia_id;
 
-  RETURN json_build_object('success', true, 'message', 'Transferencia concluida com sucesso.', 'transferencia_id', p_transferencia_id);
+  v_resultado := json_build_object('success', true, 'message', 'Transferencia concluida com sucesso.', 'transferencia_id', p_transferencia_id);
+
+  IF p_idempotency_key IS NOT NULL AND TRIM(p_idempotency_key) != '' THEN
+    INSERT INTO public.idempotencia_chaves (chave, usuario_id, escopo, parametros_hash, resultado_json)
+    VALUES (p_idempotency_key, v_user_id, 'concluir_transferencia', v_params_hash, v_resultado)
+    ON CONFLICT (chave) DO NOTHING;
+  END IF;
+
+  RETURN v_resultado;
 END;
 $$;
 
 REVOKE EXECUTE ON FUNCTION public.concluir_transferencia_rpc(bigint, text) FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.concluir_transferencia_rpc(bigint, text) TO authenticated;
+REVOKE EXECUTE ON FUNCTION public.concluir_transferencia_rpc(bigint, text, text) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.concluir_transferencia_rpc(bigint, text, text) TO authenticated;
 
 -- 10. POLÍTICAS E CONCESSÕES DAS TABELAS 'pedidos_compra' E 'itens_pedido_compra' E RPC ATÔMICO
 CREATE POLICY "Leitura Pedidos Compra por Perfil" ON public.pedidos_compra
@@ -750,9 +789,12 @@ FOR INSERT WITH CHECK (
 GRANT SELECT, INSERT ON public.itens_pedido_compra TO authenticated;
 
 -- RPC Transacional Atômico para Recebimento de Pedido de Compra
+DROP FUNCTION IF EXISTS public.receber_pedido_rpc(bigint, text);
+DROP FUNCTION IF EXISTS public.receber_pedido_rpc(bigint, text, text);
 CREATE OR REPLACE FUNCTION public.receber_pedido_rpc(
   p_pedido_id bigint,
-  p_observacao text DEFAULT NULL
+  p_observacao text DEFAULT NULL,
+  p_idempotency_key text DEFAULT NULL
 )
 RETURNS json
 LANGUAGE plpgsql
@@ -772,6 +814,9 @@ DECLARE
   v_dest_qtd_ant integer;
   v_dest_qtd_nova integer;
   v_dest_status text;
+  v_params_hash text;
+  v_idempotent_rec record;
+  v_resultado json;
 BEGIN
   v_auth_uid := auth.uid();
   IF v_auth_uid IS NULL THEN
@@ -791,6 +836,27 @@ BEGIN
   SELECT id, LOWER(tipo::text), filial_id INTO v_user_id, v_user_cargo, v_user_filial_id
   FROM public.usuarios
   WHERE auth_user_id = v_auth_uid AND ativo = true;
+
+  -- Checagem de Idempotência
+  IF p_idempotency_key IS NOT NULL AND TRIM(p_idempotency_key) != '' THEN
+    PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtext('idempotency:' || p_idempotency_key));
+    v_params_hash := md5('receber_pedido:' || COALESCE(p_pedido_id::text, '') || ':' || COALESCE(p_observacao, ''));
+
+    SELECT * INTO v_idempotent_rec
+    FROM public.idempotencia_chaves
+    WHERE chave = p_idempotency_key;
+
+    IF FOUND THEN
+      IF v_idempotent_rec.usuario_id != v_user_id THEN
+        RAISE EXCEPTION 'Acesso negado: A chave de idempotencia % pertence a outro usuario.', p_idempotency_key;
+      END IF;
+      IF v_idempotent_rec.parametros_hash = v_params_hash THEN
+        RETURN v_idempotent_rec.resultado_json;
+      ELSE
+        RAISE EXCEPTION 'Operacao negada: A chave de idempotencia % ja foi utilizada com parametros diferentes.', p_idempotency_key;
+      END IF;
+    END IF;
+  END IF;
 
   -- 1. Bloquear linha do pedido com SELECT FOR UPDATE
   SELECT * INTO v_pedido
@@ -873,7 +939,15 @@ BEGIN
       recebido_at = now()
   WHERE id = p_pedido_id;
 
-  RETURN json_build_object('success', true, 'message', 'Pedido de compra recebido com sucesso.', 'pedido_id', p_pedido_id);
+  v_resultado := json_build_object('success', true, 'message', 'Pedido de compra recebido com sucesso.', 'pedido_id', p_pedido_id);
+
+  IF p_idempotency_key IS NOT NULL AND TRIM(p_idempotency_key) != '' THEN
+    INSERT INTO public.idempotencia_chaves (chave, usuario_id, escopo, parametros_hash, resultado_json)
+    VALUES (p_idempotency_key, v_user_id, 'receber_pedido', v_params_hash, v_resultado)
+    ON CONFLICT (chave) DO NOTHING;
+  END IF;
+
+  RETURN v_resultado;
 END;
 $$;
 
@@ -1123,9 +1197,11 @@ REVOKE EXECUTE ON FUNCTION public.ajustar_estoque_rpc(bigint, bigint, text, inte
 GRANT EXECUTE ON FUNCTION public.ajustar_estoque_rpc(bigint, bigint, text, integer, text, text) TO authenticated;
 
 REVOKE EXECUTE ON FUNCTION public.concluir_transferencia_rpc(bigint, text) FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.concluir_transferencia_rpc(bigint, text) TO authenticated;
+REVOKE EXECUTE ON FUNCTION public.concluir_transferencia_rpc(bigint, text, text) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.concluir_transferencia_rpc(bigint, text, text) TO authenticated;
 
 REVOKE EXECUTE ON FUNCTION public.receber_pedido_rpc(bigint, text) FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.receber_pedido_rpc(bigint, text) TO authenticated;
+REVOKE EXECUTE ON FUNCTION public.receber_pedido_rpc(bigint, text, text) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.receber_pedido_rpc(bigint, text, text) TO authenticated;
 
 COMMIT;

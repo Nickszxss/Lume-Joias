@@ -9,16 +9,18 @@ def load_sql_content():
 
 def test_unambiguous_identity_resolution():
     sql = load_sql_content()
-    # Ensure helper functions check count(*) == 1 for active accounts
     assert "public.get_auth_user_cargo()" in sql
     assert "public.get_auth_user_filial_id()" in sql
     assert "public.get_auth_user_id()" in sql
     assert "IF v_count <> 1 THEN" in sql or "v_user_count > 1" in sql
     assert "Identidade ambígua" in sql or "RETURN NULL;" in sql
 
+def test_coalesce_cargo_and_tipo_unification():
+    sql = load_sql_content()
+    assert "COALESCE(u.cargo, u.tipo::text)" in sql or "COALESCE(cargo, tipo::text)" in sql, "Unified role fallback using COALESCE(cargo, tipo::text) missing"
+
 def test_usuario_id_spoofing_prevention():
     sql = load_sql_content()
-    # Check that INSERT policies on transferencias and pedidos_compra validate usuario_id
     assert "usuario_id = public.get_auth_user_id()" in sql, "usuario_id spoofing guard missing in RLS policies"
 
 def test_absence_of_pendente_and_presence_of_solicitada():
@@ -43,13 +45,13 @@ def test_absence_of_unconfirmed_recebido_por():
     assert "recebido_por" not in sql, "Non-existent column 'recebido_por' found in SQL script"
     assert "recebido_at" in sql, "Valid column 'recebido_at' missing from SQL script"
 
-def test_usuarios_senha_protection_and_type_conversions():
+def test_usuarios_senha_protection_and_profile_updates():
     sql = load_sql_content()
     grant_select = re.search(r"GRANT SELECT \(([^)]+)\) ON public\.usuarios", sql)
     assert grant_select is not None, "GRANT SELECT on usuarios missing"
     selected_columns = [col.strip() for col in grant_select.group(1).split(",")]
     assert "senha" not in selected_columns, "Sensitive column 'senha' included in GRANT SELECT"
-    assert "tipo::text" in sql, "Explicit type cast 'tipo::text' missing for PostgreSQL enum/varchar compatibility"
+    assert "GRANT UPDATE (nome) ON public.usuarios TO authenticated;" in sql, "GRANT UPDATE (nome) missing for usuarios"
 
 def test_produtos_filiais_inativos_explicit_privileges():
     sql = load_sql_content()
@@ -59,7 +61,6 @@ def test_produtos_filiais_inativos_explicit_privileges():
 
 def test_security_definer_audit_and_search_path():
     sql = load_sql_content()
-    # Check that search_path = '' is set on all SECURITY DEFINER functions (ignoring comments)
     sql_code_lines = [line for line in sql.splitlines() if not line.strip().startswith("--")]
     sql_code = "\n".join(sql_code_lines)
     sec_definer_count = sql_code.count("SECURITY DEFINER")
@@ -76,9 +77,13 @@ def test_rpc_execution_restrictions():
 
 def test_deadlock_prevention_advisory_locks():
     sql = load_sql_content()
-    # Verify deterministic advisory lock ordering for transfer origin and destination
     assert "v_transf.origem_id < v_transf.destino_id" in sql, "Deterministic branch advisory lock ordering missing"
     assert "pg_advisory_xact_lock" in sql, "Advisory transaction lock missing"
+
+def test_sequence_privileges_scoped_to_project_tables():
+    sql = load_sql_content()
+    assert "REVOKE ALL ON SEQUENCE" in sql, "Scoped REVOKE ALL ON SEQUENCE missing"
+    assert "GRANT USAGE, SELECT ON SEQUENCE" in sql, "Scoped GRANT USAGE, SELECT ON SEQUENCE missing"
 
 def test_negative_stock_prevention():
     sql = load_sql_content()

@@ -1,12 +1,39 @@
 -- =====================================================================
 -- SCRIPT DE POLÍTICAS RLS (ROW LEVEL SECURITY) E PRIVILÉGIOS — LUME JOIAS
 -- Arquitetura: Supabase PostgreSQL (GitHub Pages + Supabase Client)
--- Versão Auditada e Endurecida: P0/P1 Segurança, Papel Unificado e Privilégios
+-- Versão Auditada e Endurecida: P0/P1 Segurança, Vínculo Auth (auth_user_id ↔ auth.uid()) e Privilégios Restritos
 -- =====================================================================
 
 BEGIN;
 
--- Criar tabela de produtos_filiais_inativos com antecedência caso não exista
+-- 1. Alterações DDL Preventivas na Tabela 'usuarios' e Criar tabela de 'produtos_filiais_inativos'
+ALTER TABLE public.usuarios
+ADD COLUMN IF NOT EXISTS auth_user_id UUID;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'fk_usuarios_auth_user' AND conrelid = 'public.usuarios'::regclass
+    ) THEN
+        ALTER TABLE public.usuarios
+        ADD CONSTRAINT fk_usuarios_auth_user
+        FOREIGN KEY (auth_user_id) REFERENCES auth.users(id) ON DELETE SET NULL;
+    END IF;
+END $$;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'uq_usuarios_auth_user_id' AND conrelid = 'public.usuarios'::regclass
+    ) THEN
+        ALTER TABLE public.usuarios
+        ADD CONSTRAINT uq_usuarios_auth_user_id
+        UNIQUE (auth_user_id);
+    END IF;
+END $$;
+
 CREATE TABLE IF NOT EXISTS public.produtos_filiais_inativos (
     id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     produto_id bigint NOT NULL REFERENCES public.produtos(id) ON DELETE CASCADE,
@@ -16,7 +43,7 @@ CREATE TABLE IF NOT EXISTS public.produtos_filiais_inativos (
     CONSTRAINT unique_produto_filial_inativo UNIQUE (produto_id, filial_id)
 );
 
--- 1. Habilitar RLS nas 8 tabelas públicas do sistema + produtos_filiais_inativos
+-- Habilitar RLS nas 8 tabelas públicas do sistema + produtos_filiais_inativos
 ALTER TABLE public.usuarios ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.filiais ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.produtos ENABLE ROW LEVEL SECURITY;
@@ -41,10 +68,10 @@ BEGIN
     END IF;
 END $$;
 
--- 2. Funções auxiliares para extrair perfil e filial do usuário autenticado no JWT
--- Endurecidas com SECURITY DEFINER, search_path totalmente limpo (SET search_path = '') e checagem estrita de unicidade.
+-- 2. Funções auxiliares para extrair perfil e filial do usuário autenticado no Supabase Auth via auth.uid()
+-- Endurecidas com SECURITY DEFINER, search_path totalmente limpo (SET search_path = '') e checagem estrita de unicidade por auth_user_id.
 -- A fonte oficial de autorização utiliza o enum u.tipo::text ('gerente', 'funcionario').
--- Se houver ambiguidade (mais de 1 conta ativa com o mesmo e-mail) ou se a conta estiver inativa/inexistente,
+-- Se houver ausência de vínculo (auth.uid() IS NULL / auth_user_id IS NULL), ambiguidade ou se a conta estiver inativa,
 -- as funções retornam NULL, assegurando ZERO permissões por padrão nas políticas RLS.
 CREATE OR REPLACE FUNCTION public.get_auth_user_cargo()
 RETURNS text
@@ -54,18 +81,18 @@ STABLE
 SET search_path = ''
 AS $$
 DECLARE
-  v_email text;
+  v_auth_uid uuid;
   v_count integer;
   v_cargo text;
 BEGIN
-  v_email := (auth.jwt() ->> 'email');
-  IF v_email IS NULL OR v_email = '' THEN
+  v_auth_uid := auth.uid();
+  IF v_auth_uid IS NULL THEN
     RETURN NULL;
   END IF;
 
   SELECT count(*) INTO v_count
   FROM public.usuarios u
-  WHERE u.email = v_email AND u.ativo = true;
+  WHERE u.auth_user_id = v_auth_uid AND u.ativo = true;
 
   IF v_count <> 1 THEN
     RETURN NULL;
@@ -73,7 +100,7 @@ BEGIN
 
   SELECT LOWER(u.tipo::text) INTO v_cargo
   FROM public.usuarios u
-  WHERE u.email = v_email AND u.ativo = true;
+  WHERE u.auth_user_id = v_auth_uid AND u.ativo = true;
 
   RETURN v_cargo;
 END;
@@ -87,18 +114,18 @@ STABLE
 SET search_path = ''
 AS $$
 DECLARE
-  v_email text;
+  v_auth_uid uuid;
   v_count integer;
   v_filial_id bigint;
 BEGIN
-  v_email := (auth.jwt() ->> 'email');
-  IF v_email IS NULL OR v_email = '' THEN
+  v_auth_uid := auth.uid();
+  IF v_auth_uid IS NULL THEN
     RETURN NULL;
   END IF;
 
   SELECT count(*) INTO v_count
   FROM public.usuarios u
-  WHERE u.email = v_email AND u.ativo = true;
+  WHERE u.auth_user_id = v_auth_uid AND u.ativo = true;
 
   IF v_count <> 1 THEN
     RETURN NULL;
@@ -106,7 +133,7 @@ BEGIN
 
   SELECT u.filial_id INTO v_filial_id
   FROM public.usuarios u
-  WHERE u.email = v_email AND u.ativo = true;
+  WHERE u.auth_user_id = v_auth_uid AND u.ativo = true;
 
   RETURN v_filial_id;
 END;
@@ -120,18 +147,18 @@ STABLE
 SET search_path = ''
 AS $$
 DECLARE
-  v_email text;
+  v_auth_uid uuid;
   v_count integer;
   v_user_id bigint;
 BEGIN
-  v_email := (auth.jwt() ->> 'email');
-  IF v_email IS NULL OR v_email = '' THEN
+  v_auth_uid := auth.uid();
+  IF v_auth_uid IS NULL THEN
     RETURN NULL;
   END IF;
 
   SELECT count(*) INTO v_count
   FROM public.usuarios u
-  WHERE u.email = v_email AND u.ativo = true;
+  WHERE u.auth_user_id = v_auth_uid AND u.ativo = true;
 
   IF v_count <> 1 THEN
     RETURN NULL;
@@ -139,7 +166,7 @@ BEGIN
 
   SELECT u.id INTO v_user_id
   FROM public.usuarios u
-  WHERE u.email = v_email AND u.ativo = true;
+  WHERE u.auth_user_id = v_auth_uid AND u.ativo = true;
 
   RETURN v_user_id;
 END;
@@ -204,10 +231,10 @@ BEGIN
     END LOOP;
 END $$;
 
--- 5. POLÍTICAS E CONCESSÕES DA TABELA 'usuarios'
+-- 5. POLÍTICAS E CONCESSÕES DA TABELA 'usuarios' (Sem fallback por e-mail no JWT)
 CREATE POLICY "Leitura Usuarios por Perfil" ON public.usuarios
 FOR SELECT USING (
-  (email = (auth.jwt() ->> 'email') AND ativo = true) OR
+  (auth_user_id = auth.uid() AND ativo = true) OR
   (
     public.get_auth_user_cargo() = 'gerente' AND
     filial_id IS NOT DISTINCT FROM public.get_auth_user_filial_id()
@@ -216,14 +243,14 @@ FOR SELECT USING (
 
 CREATE POLICY "Bloqueio Alteracao Cargo Filial Usuarios" ON public.usuarios
 FOR UPDATE USING (
-  (email = (auth.jwt() ->> 'email') AND ativo = true) OR
+  (auth_user_id = auth.uid() AND ativo = true) OR
   (
     public.get_auth_user_cargo() = 'gerente' AND
     filial_id IS NOT DISTINCT FROM public.get_auth_user_filial_id()
   )
 ) WITH CHECK (
   (
-    email = (auth.jwt() ->> 'email') AND
+    auth_user_id = auth.uid() AND
     filial_id IS NOT DISTINCT FROM public.get_auth_user_filial_id() AND
     tipo::text IS NOT DISTINCT FROM public.get_auth_user_cargo() AND
     ativo = true
@@ -236,9 +263,9 @@ FOR UPDATE USING (
 );
 
 -- Permissões por Coluna em 'usuarios' (Omitindo explicitamente a coluna 'senha')
-REVOKE SELECT (id, nome, email, senha, cargo, tipo, filial_id, ativo, created_at) ON public.usuarios FROM PUBLIC, anon, authenticated;
-REVOKE UPDATE (id, nome, email, senha, cargo, tipo, filial_id, ativo, created_at) ON public.usuarios FROM PUBLIC, anon, authenticated;
-GRANT SELECT (id, nome, email, cargo, tipo, filial_id, ativo, created_at) ON public.usuarios TO authenticated;
+REVOKE SELECT (id, nome, email, senha, cargo, tipo, filial_id, ativo, created_at, auth_user_id) ON public.usuarios FROM PUBLIC, anon, authenticated;
+REVOKE UPDATE (id, nome, email, senha, cargo, tipo, filial_id, ativo, created_at, auth_user_id) ON public.usuarios FROM PUBLIC, anon, authenticated;
+GRANT SELECT (id, nome, email, cargo, tipo, filial_id, ativo, created_at, auth_user_id) ON public.usuarios TO authenticated;
 GRANT UPDATE (nome) ON public.usuarios TO authenticated;
 
 -- 6. POLÍTICAS E CONCESSÕES DAS TABELAS 'filiais', 'produtos' E 'produtos_filiais_inativos'
@@ -317,7 +344,7 @@ SECURITY DEFINER
 SET search_path = ''
 AS $$
 DECLARE
-  v_user_email text;
+  v_auth_uid uuid;
   v_user_count integer;
   v_user_id bigint;
   v_user_cargo text;
@@ -330,25 +357,25 @@ DECLARE
   v_status text;
   v_lock_key bigint;
 BEGIN
-  -- 1. Autenticação e Verificação Estrita de Unicidade de Usuário
-  v_user_email := (auth.jwt() ->> 'email');
-  IF v_user_email IS NULL OR v_user_email = '' THEN
+  -- 1. Autenticação e Verificação Estrita de Unicidade de Usuário por auth.uid()
+  v_auth_uid := auth.uid();
+  IF v_auth_uid IS NULL THEN
     RAISE EXCEPTION 'Acesso negado: Usuario nao autenticado.';
   END IF;
 
   SELECT count(*) INTO v_user_count
   FROM public.usuarios
-  WHERE email = v_user_email AND ativo = true;
+  WHERE auth_user_id = v_auth_uid AND ativo = true;
 
   IF v_user_count = 0 THEN
-    RAISE EXCEPTION 'Acesso negado: Conta invalida ou inativa.';
+    RAISE EXCEPTION 'Acesso negado: Conta invalida, inativa ou sem vinculo Auth.';
   ELSIF v_user_count > 1 THEN
     RAISE EXCEPTION 'Acesso negado: Identidade ambígua detectada no sistema.';
   END IF;
 
   SELECT id, LOWER(tipo::text), filial_id INTO v_user_id, v_user_cargo, v_user_filial_id
   FROM public.usuarios
-  WHERE email = v_user_email AND ativo = true;
+  WHERE auth_user_id = v_auth_uid AND ativo = true;
 
   -- Regra P0 de Autorização Estrita: Tanto gerentes quanto funcionários SÓ PODEM alterar o estoque da PRÓPRIA filial.
   IF v_user_filial_id IS NULL OR v_user_filial_id != p_filial_id THEN
@@ -485,7 +512,7 @@ SET search_path = ''
 AS $$
 DECLARE
   v_transf record;
-  v_user_email text;
+  v_auth_uid uuid;
   v_user_count integer;
   v_user_id bigint;
   v_user_cargo text;
@@ -498,24 +525,24 @@ DECLARE
   v_dest_qtd_nova integer;
   v_dest_status text;
 BEGIN
-  v_user_email := (auth.jwt() ->> 'email');
-  IF v_user_email IS NULL OR v_user_email = '' THEN
+  v_auth_uid := auth.uid();
+  IF v_auth_uid IS NULL THEN
     RAISE EXCEPTION 'Acesso negado: Usuario nao autenticado.';
   END IF;
 
   SELECT count(*) INTO v_user_count
   FROM public.usuarios
-  WHERE email = v_user_email AND ativo = true;
+  WHERE auth_user_id = v_auth_uid AND ativo = true;
 
   IF v_user_count = 0 THEN
-    RAISE EXCEPTION 'Acesso negado: Conta invalida ou inativa.';
+    RAISE EXCEPTION 'Acesso negado: Conta invalida, inativa ou sem vinculo Auth.';
   ELSIF v_user_count > 1 THEN
     RAISE EXCEPTION 'Acesso negado: Identidade ambígua detectada no sistema.';
   END IF;
 
   SELECT id, LOWER(tipo::text), filial_id INTO v_user_id, v_user_cargo, v_user_filial_id
   FROM public.usuarios
-  WHERE email = v_user_email AND ativo = true;
+  WHERE auth_user_id = v_auth_uid AND ativo = true;
 
   -- 1. Bloquear linha da transferencia com SELECT FOR UPDATE
   SELECT * INTO v_transf
@@ -543,7 +570,7 @@ BEGIN
     RAISE EXCEPTION 'Operacao negada: Quantidade da transferencia invalida (%).', v_transf.quantidade;
   END IF;
 
-  IF v_user_cargo != 'gerente' AND v_user_filial_id != v_transf.destino_id THEN
+  IF v_user_cargo != 'gerente' AND (v_user_filial_id IS NULL OR v_user_filial_id != v_transf.destino_id) THEN
     RAISE EXCEPTION 'Acesso negado: Somente gerentes ou funcionarios da filial de destino podem concluir a transferencia.';
   END IF;
 
@@ -686,7 +713,7 @@ AS $$
 DECLARE
   v_pedido record;
   v_item record;
-  v_user_email text;
+  v_auth_uid uuid;
   v_user_count integer;
   v_user_id bigint;
   v_user_cargo text;
@@ -697,24 +724,24 @@ DECLARE
   v_dest_qtd_nova integer;
   v_dest_status text;
 BEGIN
-  v_user_email := (auth.jwt() ->> 'email');
-  IF v_user_email IS NULL OR v_user_email = '' THEN
+  v_auth_uid := auth.uid();
+  IF v_auth_uid IS NULL THEN
     RAISE EXCEPTION 'Acesso negado: Usuario nao autenticado.';
   END IF;
 
   SELECT count(*) INTO v_user_count
   FROM public.usuarios
-  WHERE email = v_user_email AND ativo = true;
+  WHERE auth_user_id = v_auth_uid AND ativo = true;
 
   IF v_user_count = 0 THEN
-    RAISE EXCEPTION 'Acesso negado: Conta invalida ou inativa.';
+    RAISE EXCEPTION 'Acesso negado: Conta invalida, inativa ou sem vinculo Auth.';
   ELSIF v_user_count > 1 THEN
     RAISE EXCEPTION 'Acesso negado: Identidade ambígua detectada no sistema.';
   END IF;
 
   SELECT id, LOWER(tipo::text), filial_id INTO v_user_id, v_user_cargo, v_user_filial_id
   FROM public.usuarios
-  WHERE email = v_user_email AND ativo = true;
+  WHERE auth_user_id = v_auth_uid AND ativo = true;
 
   -- 1. Bloquear linha do pedido com SELECT FOR UPDATE
   SELECT * INTO v_pedido

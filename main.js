@@ -1125,11 +1125,26 @@ async function fazerLogin(){
       throw new Error('Acesso negado. E-mail ou senha incorretos.');
     }
 
-    const { data: uData, error: uErr } = await client
+    let uData = null;
+    let uErr = null;
+
+    const resAuth = await client
       .from('usuarios')
-      .select('id, nome, email, cargo, tipo, filial_id, ativo')
-      .ilike('email', email)
-      .single();
+      .select('id, nome, email, cargo, tipo, filial_id, ativo, auth_user_id')
+      .eq('auth_user_id', authData.user.id)
+      .maybeSingle();
+
+    if (!resAuth.error && resAuth.data) {
+      uData = resAuth.data;
+    } else {
+      const resEmail = await client
+        .from('usuarios')
+        .select('id, nome, email, cargo, tipo, filial_id, ativo, auth_user_id')
+        .ilike('email', email)
+        .maybeSingle();
+      uData = resEmail.data;
+      uErr = resEmail.error;
+    }
 
     if (uErr || !uData) {
       await client.auth.signOut();
@@ -1242,11 +1257,26 @@ async function verificarSessaoAtiva(){
       const { data, error } = await client.auth.getSession();
       if (!error && data && data.session && data.session.user) {
         const authUser = data.session.user;
-        const { data: uData, error: uErr } = await client
+        let uData = null;
+        let uErr = null;
+
+        const resAuth = await client
           .from('usuarios')
-          .select('id, nome, email, cargo, tipo, filial_id, ativo')
-          .ilike('email', authUser.email)
-          .single();
+          .select('id, nome, email, cargo, tipo, filial_id, ativo, auth_user_id')
+          .eq('auth_user_id', authUser.id)
+          .maybeSingle();
+
+        if (!resAuth.error && resAuth.data) {
+          uData = resAuth.data;
+        } else {
+          const resEmail = await client
+            .from('usuarios')
+            .select('id, nome, email, cargo, tipo, filial_id, ativo, auth_user_id')
+            .ilike('email', authUser.email)
+            .maybeSingle();
+          uData = resEmail.data;
+          uErr = resEmail.error;
+        }
 
         if (!uErr && uData && uData.ativo !== false) {
           const cargo = (uData.cargo || uData.tipo || 'funcionario').toLowerCase();

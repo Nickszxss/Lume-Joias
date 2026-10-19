@@ -2,9 +2,14 @@ import re
 import pytest
 
 SQL_FILE_PATH = "supabase_rls_policies.sql"
+MIGRATION_FILE_PATH = "scripts/migracao_vincular_auth_usuarios.sql"
 
 def load_sql_content():
     with open(SQL_FILE_PATH, "r", encoding="utf-8") as f:
+        return f.read()
+
+def load_migration_content():
+    with open(MIGRATION_FILE_PATH, "r", encoding="utf-8") as f:
         return f.read()
 
 def test_unambiguous_identity_resolution():
@@ -109,3 +114,56 @@ def test_nine_tables_rls_matrix():
     ]
     for table in tables:
         assert f"ALTER TABLE public.{table} ENABLE ROW LEVEL SECURITY;" in sql, f"RLS not enabled for public.{table}"
+
+# =====================================================================
+# TESTES DE VALIDAÇÃO DO VÍNCULO SUPABASE AUTH (auth_user_id ↔ auth.uid())
+# =====================================================================
+
+def test_auth_user_id_column_and_unique_fk():
+    sql = load_sql_content()
+    mig = load_migration_content()
+    assert "auth_user_id UUID" in sql and "auth_user_id UUID" in mig
+    assert "REFERENCES auth.users(id)" in sql or "REFERENCES auth.users(id)" in mig
+    assert "UNIQUE" in sql and "UNIQUE" in mig
+    assert "fk_usuarios_auth_user" in sql and "uq_usuarios_auth_user_id" in sql
+
+def test_migration_script_exact_match_and_exception_handling():
+    mig = load_migration_content()
+    assert "LOWER(u.email) = LOWER(a.email)" in mig
+    assert "RAISE EXCEPTION" in mig
+    assert "MIGRAÇÃO ABORTADA" in mig
+    assert "auth_user_id IS NULL" in mig
+    assert "sem conta correspondente em auth.users" in mig
+    assert "múltiplas contas correspondentes em auth.users" in mig
+
+def test_absence_of_email_jwt_fallback_in_policies_and_rpcs():
+    sql = load_sql_content()
+    assert "email = (auth.jwt() ->> 'email')" not in sql, "Found legacy email = auth.jwt() check in policies"
+    assert "v_email := (auth.jwt() ->> 'email')" not in sql, "Found legacy v_email := auth.jwt() in functions"
+    assert "v_user_email := (auth.jwt() ->> 'email')" not in sql, "Found legacy v_user_email := auth.jwt() in RPCs"
+
+def test_auth_uid_identity_resolution():
+    sql = load_sql_content()
+    assert "v_auth_uid := auth.uid();" in sql
+    assert "u.auth_user_id = v_auth_uid" in sql or "auth_user_id = v_auth_uid" in sql
+
+def test_unlinked_or_inactive_user_lockout():
+    sql = load_sql_content()
+    assert "auth_user_id = v_auth_uid AND u.ativo = true" in sql or "auth_user_id = v_auth_uid AND ativo = true" in sql
+    assert "Acesso negado: Conta invalida, inativa ou sem vinculo Auth." in sql or "RETURN NULL;" in sql
+
+def test_auxiliary_functions_and_bigint_return_type():
+    sql = load_sql_content()
+    assert "RETURNS bigint" in sql
+    assert "RETURNS text" in sql
+    assert "get_auth_user_id()" in sql
+    assert "get_auth_user_cargo()" in sql
+    assert "get_auth_user_filial_id()" in sql
+
+def test_three_rpcs_auth_uid_compatibility():
+    sql = load_sql_content()
+    rpcs = ["ajustar_estoque_rpc", "concluir_transferencia_rpc", "receber_pedido_rpc"]
+    for rpc in rpcs:
+        assert f"public.{rpc}" in sql
+        assert "v_auth_uid := auth.uid();" in sql
+        assert "auth_user_id = v_auth_uid AND ativo = true" in sql

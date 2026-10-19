@@ -124,7 +124,7 @@ client.channel('sge_realtime_channel')
 O banco de dados relacional PostgreSQL no Supabase contém 8 tabelas principais na schema `public` (conforme verificado em `supabase_rls_policies.sql` e `DOCUMENTACAO.md`):
 
 ### 6.1 Esquema do Banco de Dados Real
-1. **`usuarios`** (`id`, `nome`, `email`, `senha`, `cargo`, `tipo`, `filial_id`, `ativo`, `created_at`) — Cadastro dos perfis dos usuários e vinculação de filial.
+1. **`usuarios`** (`id`, `nome`, `email`, `senha`, `cargo`, `tipo`, `filial_id`, `ativo`, `created_at`, `auth_user_id`) — Cadastro dos perfis dos usuários e vinculação de filial com chave estrangeira `auth_user_id UUID REFERENCES auth.users(id)`.
 2. **`filiais`** (`id`, `nome`, `endereco`, `cidade`, `estado`, `ativa`, `created_at`) — Cadastro das 5 filiais oficiais (Centro, Norte, Sul, Leste, Oeste).
 3. **`produtos`** (`id`, `nome`, `descricao`, `codigo`, `unidade_medida`, `qtd_minima`, `ativo`, `created_at`) — Catálogo de produtos/joias com SKUs (código) e categorias automáticas (`ANEL`, `PULSEIRA`, `SOLITARIA`, `COLAR`, `BRINCO`).
 4. **`produtos_filiais_inativos`** (`id`, `produto_id`, `filial_id`, `desativado_por`, `created_at`) — Registro de inativação/retirada de uso local por produto e filial solicitada por gerentes.
@@ -136,7 +136,7 @@ O banco de dados relacional PostgreSQL no Supabase contém 8 tabelas principais 
 
 ### 6.2 Políticas de Segurança RLS (Row Level Security)
 As políticas RLS estão definidas em `supabase_rls_policies.sql` e garantem a nível de banco:
-- **`public.usuarios` (Correção P0 Endurecida - Tarefa 15):** Leitura restrita ao próprio perfil do usuário autenticado (`email = auth.jwt() ->> 'email'`) ou a gerentes estritamente para usuários da sua própria filial (`filial_id = public.get_auth_user_filial_id()`), bloqueando consultas cross-filial.
+- **`public.usuarios` (Vínculo Seguro Auth.uid):** Leitura e autorização resolvidas via `auth_user_id = auth.uid()` com `ativo = true` ou por gerentes estritamente para usuários da sua própria filial (`filial_id = public.get_auth_user_filial_id()`), eliminando dependência do e-mail do JWT para autorização.
 - **Ajuste Atômico de Estoque (`ajustar_estoque_rpc`):** Processamento transacional com autorização estrita por filial (`p_filial_id = usuario.filial_id`), bloqueio pessimista `FOR UPDATE` e chave transacional de concorrência `pg_advisory_xact_lock` para criar e atualizar linhas de estoque em concorrência sem saldos negativos.
 - **Fechamento de UPDATE Direto em Estoques:** Bloqueio total de permissões de `UPDATE` direto na tabela `public.estoques`, forçando a execução exclusiva via RPCs atômicas (`ajustar_estoque_rpc`, `concluir_transferencia_rpc`, `receber_pedido_rpc`).
 - **Inativação Local por Filial (`produtos_filiais_inativos`):** RLS de leitura estritamente isolado pela filial do usuário (`filial_id = public.get_auth_user_filial_id()`) e inserção/exclusão restrita exclusivamente a gerentes da própria filial, sem alterar o cadastro global nem as demais filiais.
@@ -146,10 +146,30 @@ As políticas RLS estão definidas em `supabase_rls_policies.sql` e garantem a n
 
 ## 7. Autenticação, Identificação do Usuário e Controle de Permissões
 
-### 7.1 Fluxo de Autenticação
+### 7.1 Fluxo de Autenticação e Vínculo de Identidade (Auth ↔ Usuários)
 - A autenticação é realizada via **Supabase Auth / GoTrue** com e-mail e senha (`client.auth.signInWithPassword`).
-- Após o login bem-sucedido via Auth, o sistema realiza o lookup do e-mail na tabela `public.usuarios` para obter a `filial_id`, o `cargo` (`gerente` ou `funcionario`) e o estado `ativo`.
-- Se o usuário não possuir registro correspondente ativo em `public.usuarios`, o acesso é negado com a mensagem *"Acesso negado. Perfil de funcionário não localizado."*
+- Após o login bem-sucedido via Auth, o sistema busca o perfil do usuário na tabela `public.usuarios` primariamente através do vínculo unívoco `auth_user_id = auth.user.id`.
+- As funções auxiliares e RPCs no banco de dados (`get_auth_user_cargo()`, `get_auth_user_filial_id()`, `get_auth_user_id()`, `ajustar_estoque_rpc`, `concluir_transferencia_rpc`, `receber_pedido_rpc`) validam a identidade internamente por `u.auth_user_id = auth.uid()` e `u.ativo = true`.
+- Se o usuário não possuir registro correspondente ativo em `public.usuarios` ou seu vínculo estiver ausente/inativo, o acesso é sumariamente negado com zero permissões.
+
+### 7.2 Migração Versionada do Vínculo de Identidade
+O repositório possui o script de migração DDL preparado em `scripts/migracao_vincular_auth_usuarios.sql`.
+- **Objetivo:** Adicionar a coluna `auth_user_id UUID` com constraint de Foreign Key `fk_usuarios_auth_user` para `auth.users(id)` e constraint de Unicidade `uq_usuarios_auth_user_id`.
+- **Mecanismo de Migração Inicial:** Realiza a associação inicial dos usuários cadastrados às contas do Supabase Auth por correspondência exata de e-mail (`LOWER(u.email) = LOWER(a.email)`).
+- **Validações de Interrupção Atômica:** Interrompe com `RAISE EXCEPTION` em caso de:
+  1. Registro interno em `public.usuarios` sem conta correspondente em `auth.users`.
+  2. Ambiguidade (mais de uma conta Auth para o mesmo e-mail interno).
+  3. Conta Auth sendo associada a mais de um usuário interno.
+- **Idempotência:** Pode ser reexecutado com segurança sem alterar vínculos válidos preexistentes.
+- **AVISO IMPORTANTE:** A migração **NÃO foi executada** no ambiente Supabase Cloud remoto nesta etapa. O SQL permanece versionado para revisão e aplicação futura no banco de produção/homologação.
+- **Validação Local:** A exatidão do SQL e das políticas RLS é testada localmente executando:
+  ```bash
+  /home/jules/.local/bin/pytest tests/test_9_sql_rls_validation.py
+  ```
+- **Passos Futuros no Supabase Remote:**
+  1. Aplicar a migração `scripts/migracao_vincular_auth_usuarios.sql` no SQL Editor do console Supabase.
+  2. Aplicar o DDL atualizado de políticas RLS em `supabase_rls_policies.sql`.
+  3. Verificar se todos os 7 usuários ativos possuem `auth_user_id` preenchido sem ambiguidades.
 
 ### 7.2 Perfis Oficiais Cadastrados:
 | Usuário | E-mail | Cargo | Filial Associada |

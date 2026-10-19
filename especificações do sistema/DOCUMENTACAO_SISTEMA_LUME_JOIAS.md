@@ -285,16 +285,20 @@ O projeto dispõe de 18 scripts de teste automatizados em Python utilizando a bi
 ### 14.1. Visão Geral do Mecanismo
 Para garantir a integridade dos saldos de estoque e prevenir movimentações e registros de auditoria duplicados quando ocorrem perdas de conexão de rede, o sistema Lume-Joias utiliza uma arquitetura de idempotência atômica em nível de banco de dados (`PostgreSQL PL/pgSQL`) e cliente frontend (`main.js`).
 
-### 14.2. RPCs com Suporte a Idempotência
-Todas as 5 RPCs críticas de movimentação e criação possuem suporte a chaves de idempotência UUID v4:
-1. `ajustar_estoque_rpc(p_produto_id, p_filial_id, p_tipo, p_quantidade, p_motivo, p_idempotency_key)`
-2. `criar_pedido_compra_rpc(p_filial_id, p_produto_id, p_quantidade, p_idempotency_key)`
-3. `cadastrar_produto_com_estoques_rpc(p_nome, p_sku, p_categoria, p_qtd_minima, p_idempotency_key)`
-4. `concluir_transferencia_rpc(p_transferencia_id, p_observacao, p_idempotency_key)`
-5. `receber_pedido_rpc(p_pedido_id, p_observacao, p_idempotency_key)`
+### 14.2. RPCs e Escopos Canônicos de Idempotência
+Todas as 5 RPCs críticas de movimentação e criação possuem suporte estrito a chaves de idempotência UUID v4 e escopos canônicos isolados:
+1. `ajustar_estoque_rpc(p_produto_id, p_filial_id, p_tipo, p_quantidade, p_motivo, p_idempotency_key)` — Escopo: `ajustar_estoque`
+2. `criar_pedido_compra_rpc(p_filial_id, p_produto_id, p_quantidade, p_idempotency_key)` — Escopo: `criar_pedido`
+3. `cadastrar_produto_com_estoques_rpc(p_nome, p_sku, p_categoria, p_qtd_minima, p_idempotency_key)` — Escopo: `cadastrar_produto`
+4. `concluir_transferencia_rpc(p_transferencia_id, p_observacao, p_idempotency_key)` — Escopo: `concluir_transferencia`
+5. `receber_pedido_rpc(p_pedido_id, p_observacao, p_idempotency_key)` — Escopo: `receber_pedido`
 
 ### 14.3. Regras e Garantias de Execução
 - **Advisory Locks Transacionais (`pg_advisory_xact_lock`):** A recepção de uma chave de idempotência aciona um bloqueio transacional determinístico no hash da chave (`hashtext('idempotency:' || p_idempotency_key)`), serializando requisições simultâneas e eliminando condições de corrida.
-- **Validação do Hash de Parâmetros (`md5`):** Se uma chave de idempotência for reenviada com os mesmos parâmetros, o RPC retorna imediatamente o JSON de resposta cacheado em `public.idempotencia_chaves` sem executar novas alterações no banco. Se for reenviada com parâmetros diferentes, a chamada é rejeitada por inconformidade (`RAISE EXCEPTION`).
-- **Validação de Propriedade do Usuário (`usuario_id = v_user_id`):** O banco valida se a chave pertence ao mesmo usuário autenticado, impedindo que usuários mal-intencionados obtenham respostas de chaves geradas por outros usuários.
-- **Ciclo de Vida no Frontend (`main.js`):** O frontend gera UUIDs v4 na abertura de modais (`ajusteIdempotencyKey`, `pedidoIdempotencyKey`, `produtoIdempotencyKey`) ou no clique de botões por item (`concluirTransfKeysMap[id]`, `receberPedidoKeysMap[id]`). A chave é retida durante erros de rede e destruída apenas após a confirmação de sucesso com o servidor.
+- **Validação Sequencial Tríplice (Propriedade, Escopo e Hash):** Cada RPC valida em sequência:
+  1. *Propriedade do Usuário:* `v_idempotent_rec.usuario_id IS DISTINCT FROM v_user_id` (impede sequestro ou exposição de respostas entre usuários).
+  2. *Escopo Canônico:* `v_idempotent_rec.escopo IS DISTINCT FROM '<escopo_canonico>'` (impede reutilização de chaves entre operações distintas).
+  3. *Hash MD5 de Parâmetros:* Se os parâmetros forem idênticos, retorna o resultado armazenado. Se divergirem, rejeita com exceção explícita.
+- **Tratamento Imune a NULLs (`IS DISTINCT FROM`):** Todas as comparações lógicas utilizam `IS DISTINCT FROM` e `COALESCE` para evitar falhas de lógica booleana trivalente diante de colunas nulas em dados legados.
+- **Ciclo de Vida no Frontend (`main.js` & `sessionStorage`):** O frontend gerencia as chaves utilizando `ObterChaveIdempotenciaFrontend` e `LimparChaveIdempotenciaFrontend`. As chaves são persistidas no `sessionStorage` (sob a chave `lume_idempotency_${userId}_${escopo}_${id}`) com fallback transparente para mapas em memória. Em caso de perda de conexão de rede ou reload da página, a mesma chave é mantida e reenviada. A chave é expurgada do armazenamento local e da memória exclusivamente após a confirmação confiável de sucesso (`res.success === true`).
+- **Pré-condições da Migração (`scripts/migracao_idempotencia_chaves.sql`):** A tabela `public.idempotencia_chaves` requer que a coluna `chave` possua restrição de unicidade `UNIQUE (chave)` e que todas as colunas críticas (`chave`, `usuario_id`, `escopo`, `parametros_hash`, `resultado_json`) sejam `NOT NULL`. A migração executa verificações prévias no `pg_constraint` e `pg_index` e realiza um `RAISE EXCEPTION` abortando a transação se forem detectados registros nulos de `usuario_id` ou chaves duplicadas.

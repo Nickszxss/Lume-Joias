@@ -44,8 +44,17 @@ def test_cenario_c_e_d_advisory_locks_e_atomicitatade_rollback():
 def test_cenario_e_chave_outro_usuario_rejeicao():
     sql = load_sql_content()
     # Verifica protecao contra sequestro de respostas de outro usuario
-    assert "IF v_idempotent_rec.usuario_id != v_user_id THEN" in sql
+    assert ("IF v_idempotent_rec.usuario_id != v_user_id THEN" in sql or "IF v_idempotent_rec.usuario_id IS DISTINCT FROM v_user_id THEN" in sql)
     assert "Acesso negado: A chave de idempotencia % pertence a outro usuario." in sql
+
+def test_validacao_5_escopos_canonicos_e_propriedade():
+    sql = load_sql_content()
+    # Verifica escopos canonicos nas 5 RPCs
+    assert "IF v_idempotent_rec.escopo IS DISTINCT FROM 'ajustar_estoque' THEN" in sql
+    assert "IF v_idempotent_rec.escopo IS DISTINCT FROM 'concluir_transferencia' THEN" in sql
+    assert "IF v_idempotent_rec.escopo IS DISTINCT FROM 'receber_pedido' THEN" in sql
+    assert "IF v_idempotent_rec.escopo IS DISTINCT FROM 'criar_pedido' THEN" in sql
+    assert "IF v_idempotent_rec.escopo IS DISTINCT FROM 'cadastrar_produto' THEN" in sql
 
 def test_cenario_f_frontend_keys_map_e_retentativa():
     js = load_main_js_content()
@@ -63,3 +72,8 @@ def test_cenario_f_assinaturas_sql_e_revogacoes():
     assert "DROP FUNCTION IF EXISTS public.receber_pedido_rpc(bigint, text, text);" in sql
     assert "GRANT EXECUTE ON FUNCTION public.concluir_transferencia_rpc(bigint, text, text) TO authenticated;" in sql
     assert "GRANT EXECUTE ON FUNCTION public.receber_pedido_rpc(bigint, text, text) TO authenticated;" in sql
+
+def test_receber_pedido_rpc_permissao_gerente():
+    sql = load_sql_content()
+    # Verifica que gerentes podem receber pedidos mesmo de filiais distintas
+    assert "IF v_user_cargo != 'gerente' AND (v_user_filial_id IS NULL OR v_user_filial_id != v_pedido.filial_id) THEN" in sql

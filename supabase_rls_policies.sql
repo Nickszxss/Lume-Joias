@@ -1,7 +1,7 @@
 -- =====================================================================
 -- SCRIPT DE POLÍTICAS RLS (ROW LEVEL SECURITY) E PRIVILÉGIOS — LUME JOIAS
 -- Arquitetura: Supabase PostgreSQL (GitHub Pages + Supabase Client)
--- Versão Auditada e Endurecida: P0/P1 Segurança e Unicidade de Identidade
+-- Versão Auditada e Endurecida: P0/P1 Segurança, Papel Unificado e Privilégios
 -- =====================================================================
 
 BEGIN;
@@ -34,7 +34,7 @@ DECLARE
 BEGIN
     SELECT count(*) INTO v_negatives_count FROM public.estoques WHERE quantidade < 0;
     IF v_negatives_count > 0 THEN
-        RAISE EXCEPTION 'ERRO DE SEGURANÇA: Existem % registros com quantidade negativa na tabela public.estoques. A constraint CHECK (quantidade >= 0) nao pode ser aplicada. Regularize os saldos antes de reexecutar o script.', v_negatives_count;
+        RAISE EXCEPTION 'ERRO DE SEGURANÇA: Existem % registros com quantidade negativa na tabela public.estoques. A constraint CHECK (quantidade >= 0) nao pode ser aplicada. Regularize os saldos antes de reexecutar os script.', v_negatives_count;
     ELSE
         ALTER TABLE public.estoques DROP CONSTRAINT IF EXISTS estoques_quantidade_nonnegative;
         ALTER TABLE public.estoques ADD CONSTRAINT estoques_quantidade_nonnegative CHECK (quantidade >= 0);
@@ -43,6 +43,7 @@ END $$;
 
 -- 2. Funções auxiliares para extrair perfil e filial do usuário autenticado no JWT
 -- Endurecidas com SECURITY DEFINER, search_path totalmente limpo (SET search_path = '') e checagem estrita de unicidade.
+-- A fonte oficial de autorização unifica u.cargo e u.tipo via COALESCE(u.cargo, u.tipo::text).
 -- Se houver ambiguidade (mais de 1 conta ativa com o mesmo e-mail) ou se a conta estiver inativa/inexistente,
 -- as funções retornam NULL, assegurando ZERO permissões por padrão nas políticas RLS.
 CREATE OR REPLACE FUNCTION public.get_auth_user_cargo()
@@ -70,7 +71,7 @@ BEGIN
     RETURN NULL;
   END IF;
 
-  SELECT u.cargo INTO v_cargo
+  SELECT LOWER(COALESCE(u.cargo, u.tipo::text)) INTO v_cargo
   FROM public.usuarios u
   WHERE u.email = v_email AND u.ativo = true;
 
@@ -171,11 +172,10 @@ BEGIN
     END LOOP;
 END $$;
 
--- 4. REVOGAÇÃO RIGOROSA DE PRIVILÉGIOS RESIDUAIS SOBRE TABELAS E SEQUÊNCIAS
+-- 4. REVOGAÇÃO RIGOROSA DE PRIVILÉGIOS RESIDUAIS SOBRE TABELAS E SEQUÊNCIAS DO PROJETO
 REVOKE ALL ON public.usuarios, public.filiais, public.produtos, public.estoques, public.movimentacoes, public.transferencias, public.pedidos_compra, public.itens_pedido_compra, public.produtos_filiais_inativos FROM PUBLIC, anon, authenticated;
-REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM PUBLIC, anon, authenticated;
 
--- Permissões estritas em sequências vinculadas explicitamente a colunas das tabelas do Lume-Joias
+-- Permissões estritas EXCLUSIVAMENTE em sequências vinculadas a colunas das 9 tabelas do Lume-Joias
 DO $$
 DECLARE
     seq RECORD;
@@ -199,6 +199,7 @@ BEGIN
             'produtos_filiais_inativos'
           )
     LOOP
+        EXECUTE format('REVOKE ALL ON SEQUENCE %I.%I FROM PUBLIC, anon, authenticated', seq.seqschema, seq.seqname);
         EXECUTE format('GRANT USAGE, SELECT ON SEQUENCE %I.%I TO authenticated', seq.seqschema, seq.seqname);
     END LOOP;
 END $$;
@@ -347,7 +348,7 @@ BEGIN
     RAISE EXCEPTION 'Acesso negado: Identidade ambígua detectada no sistema.';
   END IF;
 
-  SELECT id, cargo, filial_id INTO v_user_id, v_user_cargo, v_user_filial_id
+  SELECT id, LOWER(COALESCE(cargo, tipo::text)), filial_id INTO v_user_id, v_user_cargo, v_user_filial_id
   FROM public.usuarios
   WHERE email = v_user_email AND ativo = true;
 
@@ -514,7 +515,7 @@ BEGIN
     RAISE EXCEPTION 'Acesso negado: Identidade ambígua detectada no sistema.';
   END IF;
 
-  SELECT id, cargo, filial_id INTO v_user_id, v_user_cargo, v_user_filial_id
+  SELECT id, LOWER(COALESCE(cargo, tipo::text)), filial_id INTO v_user_id, v_user_cargo, v_user_filial_id
   FROM public.usuarios
   WHERE email = v_user_email AND ativo = true;
 
@@ -713,7 +714,7 @@ BEGIN
     RAISE EXCEPTION 'Acesso negado: Identidade ambígua detectada no sistema.';
   END IF;
 
-  SELECT id, cargo, filial_id INTO v_user_id, v_user_cargo, v_user_filial_id
+  SELECT id, LOWER(COALESCE(cargo, tipo::text)), filial_id INTO v_user_id, v_user_cargo, v_user_filial_id
   FROM public.usuarios
   WHERE email = v_user_email AND ativo = true;
 
@@ -802,13 +803,13 @@ BEGIN
 END;
 $$;
 
-REVOKE EXECUTE ON FUNCTION public.ajustar_estoque_rpc(bigint, bigint, text, integer, text) FROM PUBLIC;
+REVOKE EXECUTE ON FUNCTION public.ajustar_estoque_rpc(bigint, bigint, text, integer, text) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.ajustar_estoque_rpc(bigint, bigint, text, integer, text) TO authenticated;
 
-REVOKE EXECUTE ON FUNCTION public.concluir_transferencia_rpc(bigint, text) FROM PUBLIC;
+REVOKE EXECUTE ON FUNCTION public.concluir_transferencia_rpc(bigint, text) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.concluir_transferencia_rpc(bigint, text) TO authenticated;
 
-REVOKE EXECUTE ON FUNCTION public.receber_pedido_rpc(bigint, text) FROM PUBLIC;
+REVOKE EXECUTE ON FUNCTION public.receber_pedido_rpc(bigint, text) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.receber_pedido_rpc(bigint, text) TO authenticated;
 
 COMMIT;

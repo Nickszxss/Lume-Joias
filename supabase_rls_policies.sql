@@ -1,6 +1,7 @@
 -- =====================================================================
 -- SCRIPT DE POLÍTICAS RLS (ROW LEVEL SECURITY) E PRIVILÉGIOS — LUME JOIAS
 -- Arquitetura: Supabase PostgreSQL (GitHub Pages + Supabase Client)
+-- Versão Auditada e Endurecida: P0/P1 Segurança e Unicidade de Identidade
 -- =====================================================================
 
 BEGIN;
@@ -41,42 +42,115 @@ BEGIN
 END $$;
 
 -- 2. Funções auxiliares para extrair perfil e filial do usuário autenticado no JWT
--- Endurecidas com SECURITY DEFINER e search_path totalmente limpo (SET search_path = '') com qualificações explícitas.
--- Retornam NULL se a identidade no JWT for anônima, inválida, não encontrada ou se o usuário estiver INATIVO (u.ativo = true),
--- garantindo que usuários inativos ou não reconhecidos obtenham ZERO permissões por padrão nas políticas RLS.
+-- Endurecidas com SECURITY DEFINER, search_path totalmente limpo (SET search_path = '') e checagem estrita de unicidade.
+-- Se houver ambiguidade (mais de 1 conta ativa com o mesmo e-mail) ou se a conta estiver inativa/inexistente,
+-- as funções retornam NULL, assegurando ZERO permissões por padrão nas políticas RLS.
 CREATE OR REPLACE FUNCTION public.get_auth_user_cargo()
 RETURNS text
-LANGUAGE sql
+LANGUAGE plpgsql
 SECURITY DEFINER
 STABLE
 SET search_path = ''
 AS $$
-  SELECT u.cargo
+DECLARE
+  v_email text;
+  v_count integer;
+  v_cargo text;
+BEGIN
+  v_email := (auth.jwt() ->> 'email');
+  IF v_email IS NULL OR v_email = '' THEN
+    RETURN NULL;
+  END IF;
+
+  SELECT count(*) INTO v_count
   FROM public.usuarios u
-  WHERE u.email = (auth.jwt() ->> 'email')
-    AND u.ativo = true
-  LIMIT 1;
+  WHERE u.email = v_email AND u.ativo = true;
+
+  IF v_count <> 1 THEN
+    RETURN NULL;
+  END IF;
+
+  SELECT u.cargo INTO v_cargo
+  FROM public.usuarios u
+  WHERE u.email = v_email AND u.ativo = true;
+
+  RETURN v_cargo;
+END;
 $$;
 
 CREATE OR REPLACE FUNCTION public.get_auth_user_filial_id()
 RETURNS bigint
-LANGUAGE sql
+LANGUAGE plpgsql
 SECURITY DEFINER
 STABLE
 SET search_path = ''
 AS $$
-  SELECT u.filial_id
+DECLARE
+  v_email text;
+  v_count integer;
+  v_filial_id bigint;
+BEGIN
+  v_email := (auth.jwt() ->> 'email');
+  IF v_email IS NULL OR v_email = '' THEN
+    RETURN NULL;
+  END IF;
+
+  SELECT count(*) INTO v_count
   FROM public.usuarios u
-  WHERE u.email = (auth.jwt() ->> 'email')
-    AND u.ativo = true
-  LIMIT 1;
+  WHERE u.email = v_email AND u.ativo = true;
+
+  IF v_count <> 1 THEN
+    RETURN NULL;
+  END IF;
+
+  SELECT u.filial_id INTO v_filial_id
+  FROM public.usuarios u
+  WHERE u.email = v_email AND u.ativo = true;
+
+  RETURN v_filial_id;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.get_auth_user_id()
+RETURNS bigint
+LANGUAGE plpgsql
+SECURITY DEFINER
+STABLE
+SET search_path = ''
+AS $$
+DECLARE
+  v_email text;
+  v_count integer;
+  v_user_id bigint;
+BEGIN
+  v_email := (auth.jwt() ->> 'email');
+  IF v_email IS NULL OR v_email = '' THEN
+    RETURN NULL;
+  END IF;
+
+  SELECT count(*) INTO v_count
+  FROM public.usuarios u
+  WHERE u.email = v_email AND u.ativo = true;
+
+  IF v_count <> 1 THEN
+    RETURN NULL;
+  END IF;
+
+  SELECT u.id INTO v_user_id
+  FROM public.usuarios u
+  WHERE u.email = v_email AND u.ativo = true;
+
+  RETURN v_user_id;
+END;
 $$;
 
 -- Restringir execução de funções SECURITY DEFINER apenas para usuários autenticados
 REVOKE EXECUTE ON FUNCTION public.get_auth_user_cargo() FROM PUBLIC, anon;
 REVOKE EXECUTE ON FUNCTION public.get_auth_user_filial_id() FROM PUBLIC, anon;
+REVOKE EXECUTE ON FUNCTION public.get_auth_user_id() FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.get_auth_user_cargo() TO authenticated;
 GRANT EXECUTE ON FUNCTION public.get_auth_user_filial_id() TO authenticated;
+GRANT EXECUTE ON FUNCTION public.get_auth_user_id() TO authenticated;
 
 -- 3. Bloco PL/pgSQL Idempotente para remover TODAS as políticas preexistentes nas tabelas
 DO $$
@@ -245,6 +319,7 @@ SET search_path = ''
 AS $$
 DECLARE
   v_user_email text;
+  v_user_count integer;
   v_user_id bigint;
   v_user_cargo text;
   v_user_filial_id bigint;
@@ -256,20 +331,25 @@ DECLARE
   v_status text;
   v_lock_key bigint;
 BEGIN
-  -- 1. Autenticação e Verificação de Usuário
+  -- 1. Autenticação e Verificação Estrita de Unicidade de Usuário
   v_user_email := (auth.jwt() ->> 'email');
-  IF v_user_email IS NULL THEN
+  IF v_user_email IS NULL OR v_user_email = '' THEN
     RAISE EXCEPTION 'Acesso negado: Usuario nao autenticado.';
+  END IF;
+
+  SELECT count(*) INTO v_user_count
+  FROM public.usuarios
+  WHERE email = v_user_email AND ativo = true;
+
+  IF v_user_count = 0 THEN
+    RAISE EXCEPTION 'Acesso negado: Conta invalida ou inativa.';
+  ELSIF v_user_count > 1 THEN
+    RAISE EXCEPTION 'Acesso negado: Identidade ambígua detectada no sistema.';
   END IF;
 
   SELECT id, cargo, filial_id INTO v_user_id, v_user_cargo, v_user_filial_id
   FROM public.usuarios
-  WHERE email = v_user_email AND ativo = true
-  LIMIT 1;
-
-  IF v_user_id IS NULL THEN
-    RAISE EXCEPTION 'Acesso negado: Conta invalida ou inativa.';
-  END IF;
+  WHERE email = v_user_email AND ativo = true;
 
   -- Regra P0 de Autorização Estrita: Tanto gerentes quanto funcionários SÓ PODEM alterar o estoque da PRÓPRIA filial.
   IF v_user_filial_id IS NULL OR v_user_filial_id != p_filial_id THEN
@@ -387,7 +467,8 @@ FOR INSERT WITH CHECK (
   ) AND
   origem_id != destino_id AND
   quantidade > 0 AND
-  status::text = 'solicitada'
+  status::text = 'solicitada' AND
+  usuario_id = public.get_auth_user_id()
 );
 
 GRANT SELECT, INSERT ON public.transferencias TO authenticated;
@@ -406,6 +487,7 @@ AS $$
 DECLARE
   v_transf record;
   v_user_email text;
+  v_user_count integer;
   v_user_id bigint;
   v_user_cargo text;
   v_user_filial_id bigint;
@@ -418,18 +500,23 @@ DECLARE
   v_dest_status text;
 BEGIN
   v_user_email := (auth.jwt() ->> 'email');
-  IF v_user_email IS NULL THEN
+  IF v_user_email IS NULL OR v_user_email = '' THEN
     RAISE EXCEPTION 'Acesso negado: Usuario nao autenticado.';
+  END IF;
+
+  SELECT count(*) INTO v_user_count
+  FROM public.usuarios
+  WHERE email = v_user_email AND ativo = true;
+
+  IF v_user_count = 0 THEN
+    RAISE EXCEPTION 'Acesso negado: Conta invalida ou inativa.';
+  ELSIF v_user_count > 1 THEN
+    RAISE EXCEPTION 'Acesso negado: Identidade ambígua detectada no sistema.';
   END IF;
 
   SELECT id, cargo, filial_id INTO v_user_id, v_user_cargo, v_user_filial_id
   FROM public.usuarios
-  WHERE email = v_user_email AND ativo = true
-  LIMIT 1;
-
-  IF v_user_id IS NULL THEN
-    RAISE EXCEPTION 'Acesso negado: Conta invalida ou inativa.';
-  END IF;
+  WHERE email = v_user_email AND ativo = true;
 
   -- 1. Bloquear linha da transferencia com SELECT FOR UPDATE
   SELECT * INTO v_transf
@@ -553,7 +640,8 @@ FOR SELECT USING (
 CREATE POLICY "Insercao Pedidos Compra Apenas Gerente" ON public.pedidos_compra
 FOR INSERT WITH CHECK (
   public.get_auth_user_cargo() = 'gerente' AND
-  status::text = 'aberto'
+  status::text = 'aberto' AND
+  usuario_id = public.get_auth_user_id()
 );
 
 GRANT SELECT, INSERT ON public.pedidos_compra TO authenticated;
@@ -600,6 +688,7 @@ DECLARE
   v_pedido record;
   v_item record;
   v_user_email text;
+  v_user_count integer;
   v_user_id bigint;
   v_user_cargo text;
   v_user_filial_id bigint;
@@ -610,18 +699,23 @@ DECLARE
   v_dest_status text;
 BEGIN
   v_user_email := (auth.jwt() ->> 'email');
-  IF v_user_email IS NULL THEN
+  IF v_user_email IS NULL OR v_user_email = '' THEN
     RAISE EXCEPTION 'Acesso negado: Usuario nao autenticado.';
+  END IF;
+
+  SELECT count(*) INTO v_user_count
+  FROM public.usuarios
+  WHERE email = v_user_email AND ativo = true;
+
+  IF v_user_count = 0 THEN
+    RAISE EXCEPTION 'Acesso negado: Conta invalida ou inativa.';
+  ELSIF v_user_count > 1 THEN
+    RAISE EXCEPTION 'Acesso negado: Identidade ambígua detectada no sistema.';
   END IF;
 
   SELECT id, cargo, filial_id INTO v_user_id, v_user_cargo, v_user_filial_id
   FROM public.usuarios
-  WHERE email = v_user_email AND ativo = true
-  LIMIT 1;
-
-  IF v_user_id IS NULL THEN
-    RAISE EXCEPTION 'Acesso negado: Conta invalida ou inativa.';
-  END IF;
+  WHERE email = v_user_email AND ativo = true;
 
   -- 1. Bloquear linha do pedido com SELECT FOR UPDATE
   SELECT * INTO v_pedido
@@ -645,8 +739,8 @@ BEGIN
     RAISE EXCEPTION 'Operacao negada: Pedido ID % possui status invalido (%) para recebimento.', p_pedido_id, v_pedido.status;
   END IF;
 
-  IF v_user_cargo != 'gerente' AND v_user_filial_id != v_pedido.filial_id THEN
-    RAISE EXCEPTION 'Acesso negado: Usuario nao pertence a filial responsável pelo pedido.';
+  IF v_user_filial_id IS NULL OR v_user_filial_id != v_pedido.filial_id THEN
+    RAISE EXCEPTION 'Acesso negado: Usuario nao possui permissao para receber pedidos de outra filial (Filial do Pedido: %, Sua Filial: %).', v_pedido.filial_id, v_user_filial_id;
   END IF;
 
   -- 2. Validar existencia de itens no pedido
@@ -708,7 +802,13 @@ BEGIN
 END;
 $$;
 
-REVOKE EXECUTE ON FUNCTION public.receber_pedido_rpc(bigint, text) FROM PUBLIC, anon;
+REVOKE EXECUTE ON FUNCTION public.ajustar_estoque_rpc(bigint, bigint, text, integer, text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.ajustar_estoque_rpc(bigint, bigint, text, integer, text) TO authenticated;
+
+REVOKE EXECUTE ON FUNCTION public.concluir_transferencia_rpc(bigint, text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.concluir_transferencia_rpc(bigint, text) TO authenticated;
+
+REVOKE EXECUTE ON FUNCTION public.receber_pedido_rpc(bigint, text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.receber_pedido_rpc(bigint, text) TO authenticated;
 
 COMMIT;

@@ -7,56 +7,65 @@ def load_sql_content():
     with open(SQL_FILE_PATH, "r", encoding="utf-8") as f:
         return f.read()
 
+def test_unambiguous_identity_resolution():
+    sql = load_sql_content()
+    # Ensure helper functions check count(*) == 1 for active accounts
+    assert "public.get_auth_user_cargo()" in sql
+    assert "public.get_auth_user_filial_id()" in sql
+    assert "public.get_auth_user_id()" in sql
+    assert "IF v_count <> 1 THEN" in sql or "v_user_count > 1" in sql
+    assert "Identidade ambígua" in sql or "RETURN NULL;" in sql
+
+def test_usuario_id_spoofing_prevention():
+    sql = load_sql_content()
+    # Check that INSERT policies on transferencias and pedidos_compra validate usuario_id
+    assert "usuario_id = public.get_auth_user_id()" in sql, "usuario_id spoofing guard missing in RLS policies"
+
 def test_absence_of_pendente_and_presence_of_solicitada():
     sql = load_sql_content()
-    # Ensure 'pendente' is not used as a valid status in transfer RLS policy or RPC
     assert "status = 'pendente'" not in sql, "'pendente' status check found in SQL policies"
     assert "status::text = 'pendente'" not in sql, "'pendente' status check found in SQL policies"
     assert "status != 'pendente'" not in sql, "'pendente' status check found in RPC"
     assert "status::text != 'pendente'" not in sql, "'pendente' status check found in RPC"
-
-    # Ensure 'solicitada' is properly checked
     assert "solicitada" in sql, "'solicitada' state missing from SQL script"
     assert "status::text = 'solicitada'" in sql or "status = 'solicitada'" in sql, "Transfer status 'solicitada' missing from RLS policy"
 
 def test_stock_status_logic_and_qtd_minima():
     sql = load_sql_content()
-    # Check that 'zerado', 'baixo', and 'suficiente' are evaluated in RPCs
     assert "'zerado'" in sql, "Stock status 'zerado' missing"
     assert "'baixo'" in sql, "Stock status 'baixo' missing"
     assert "'suficiente'" in sql, "Stock status 'suficiente' missing"
-
-    # Verify qtd_minima usage from produtos
     assert "qtd_minima" in sql, "produtos.qtd_minima missing from stock calculation"
-
-    # Ensure non-existent column 'estoque_minimo' is NOT referenced
     assert "estoque_minimo" not in sql, "Invalid column 'estoque_minimo' referenced in SQL"
 
 def test_absence_of_unconfirmed_recebido_por():
     sql = load_sql_content()
-    # Verify recebido_por is NOT in the SQL script
     assert "recebido_por" not in sql, "Non-existent column 'recebido_por' found in SQL script"
-    # Ensure recebido_at IS preserved
     assert "recebido_at" in sql, "Valid column 'recebido_at' missing from SQL script"
 
 def test_usuarios_senha_protection_and_type_conversions():
     sql = load_sql_content()
-    # Ensure senha is omitted from GRANT SELECT
     grant_select = re.search(r"GRANT SELECT \(([^)]+)\) ON public\.usuarios", sql)
     assert grant_select is not None, "GRANT SELECT on usuarios missing"
     selected_columns = [col.strip() for col in grant_select.group(1).split(",")]
     assert "senha" not in selected_columns, "Sensitive column 'senha' included in GRANT SELECT"
-
-    # Verify explicit type conversion between tipo_usuario and text (cargo)
     assert "tipo::text" in sql, "Explicit type cast 'tipo::text' missing for PostgreSQL enum/varchar compatibility"
 
 def test_produtos_filiais_inativos_explicit_privileges():
     sql = load_sql_content()
-    # Check table creation and RLS
     assert "CREATE TABLE IF NOT EXISTS public.produtos_filiais_inativos" in sql or "ALTER TABLE public.produtos_filiais_inativos ENABLE ROW LEVEL SECURITY;" in sql
-    # Check REVOKE ALL includes produtos_filiais_inativos
     revoke_match = re.search(r"REVOKE ALL ON [^;]*produtos_filiais_inativos[^;]*FROM", sql)
     assert revoke_match is not None, "Explicit REVOKE ALL on produtos_filiais_inativos missing"
+
+def test_security_definer_audit_and_search_path():
+    sql = load_sql_content()
+    # Check that search_path = '' is set on all SECURITY DEFINER functions (ignoring comments)
+    sql_code_lines = [line for line in sql.splitlines() if not line.strip().startswith("--")]
+    sql_code = "\n".join(sql_code_lines)
+    sec_definer_count = sql_code.count("SECURITY DEFINER")
+    search_path_count = sql_code.count("SET search_path = ''")
+    assert sec_definer_count > 0, "No SECURITY DEFINER functions found"
+    assert sec_definer_count == search_path_count, "All SECURITY DEFINER functions must set search_path = ''"
 
 def test_rpc_execution_restrictions():
     sql = load_sql_content()
@@ -64,7 +73,12 @@ def test_rpc_execution_restrictions():
     for rpc in rpcs:
         assert f"REVOKE EXECUTE ON FUNCTION public.{rpc}" in sql, f"REVOKE EXECUTE for {rpc} missing"
         assert f"GRANT EXECUTE ON FUNCTION public.{rpc}" in sql, f"GRANT EXECUTE for {rpc} missing"
-        assert "SECURITY DEFINER" in sql, f"SECURITY DEFINER for {rpc} missing"
+
+def test_deadlock_prevention_advisory_locks():
+    sql = load_sql_content()
+    # Verify deterministic advisory lock ordering for transfer origin and destination
+    assert "v_transf.origem_id < v_transf.destino_id" in sql, "Deterministic branch advisory lock ordering missing"
+    assert "pg_advisory_xact_lock" in sql, "Advisory transaction lock missing"
 
 def test_negative_stock_prevention():
     sql = load_sql_content()
@@ -78,6 +92,15 @@ def test_transaction_boundaries():
 
 def test_seed_data_preservation():
     sql = load_sql_content()
-    # Script should NOT contain INSERT statements into seed data like usuarios or filiais
     assert "INSERT INTO public.usuarios" not in sql, "Found prohibited direct INSERT into usuarios"
     assert "INSERT INTO public.filiais" not in sql, "Found prohibited direct INSERT into filiais"
+
+def test_nine_tables_rls_matrix():
+    sql = load_sql_content()
+    tables = [
+        'usuarios', 'filiais', 'produtos', 'estoques',
+        'movimentacoes', 'transferencias', 'pedidos_compra', 'itens_pedido_compra',
+        'produtos_filiais_inativos'
+    ]
+    for table in tables:
+        assert f"ALTER TABLE public.{table} ENABLE ROW LEVEL SECURITY;" in sql, f"RLS not enabled for public.{table}"

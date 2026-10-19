@@ -34,7 +34,7 @@ DECLARE
 BEGIN
     SELECT count(*) INTO v_negatives_count FROM public.estoques WHERE quantidade < 0;
     IF v_negatives_count > 0 THEN
-        RAISE EXCEPTION 'ERRO DE SEGURANÇA: Existem % registros com quantidade negativa na tabela public.estoques. A constraint CHECK (quantidade >= 0) nao pode ser aplicada. Regularize os saldos antes de reexecutar os script.', v_negatives_count;
+        RAISE EXCEPTION 'ERRO DE SEGURANÇA: Existem % registros com quantidade negativa na tabela public.estoques. A constraint CHECK (quantidade >= 0) nao pode ser aplicada. Regularize os saldos antes de reexecutar o script.', v_negatives_count;
     ELSE
         ALTER TABLE public.estoques DROP CONSTRAINT IF EXISTS estoques_quantidade_nonnegative;
         ALTER TABLE public.estoques ADD CONSTRAINT estoques_quantidade_nonnegative CHECK (quantidade >= 0);
@@ -43,7 +43,7 @@ END $$;
 
 -- 2. Funções auxiliares para extrair perfil e filial do usuário autenticado no JWT
 -- Endurecidas com SECURITY DEFINER, search_path totalmente limpo (SET search_path = '') e checagem estrita de unicidade.
--- A fonte oficial de autorização unifica u.cargo e u.tipo via COALESCE(u.cargo, u.tipo::text).
+-- A fonte oficial de autorização utiliza o enum u.tipo::text ('gerente', 'funcionario').
 -- Se houver ambiguidade (mais de 1 conta ativa com o mesmo e-mail) ou se a conta estiver inativa/inexistente,
 -- as funções retornam NULL, assegurando ZERO permissões por padrão nas políticas RLS.
 CREATE OR REPLACE FUNCTION public.get_auth_user_cargo()
@@ -71,7 +71,7 @@ BEGIN
     RETURN NULL;
   END IF;
 
-  SELECT LOWER(COALESCE(u.cargo, u.tipo::text)) INTO v_cargo
+  SELECT LOWER(u.tipo::text) INTO v_cargo
   FROM public.usuarios u
   WHERE u.email = v_email AND u.ativo = true;
 
@@ -224,7 +224,6 @@ FOR UPDATE USING (
 ) WITH CHECK (
   (
     email = (auth.jwt() ->> 'email') AND
-    cargo IS NOT DISTINCT FROM public.get_auth_user_cargo() AND
     filial_id IS NOT DISTINCT FROM public.get_auth_user_filial_id() AND
     tipo::text IS NOT DISTINCT FROM public.get_auth_user_cargo() AND
     ativo = true
@@ -232,7 +231,6 @@ FOR UPDATE USING (
   (
     public.get_auth_user_cargo() = 'gerente' AND
     filial_id IS NOT DISTINCT FROM public.get_auth_user_filial_id() AND
-    cargo = 'funcionario' AND
     tipo::text = 'funcionario'
   )
 );
@@ -348,7 +346,7 @@ BEGIN
     RAISE EXCEPTION 'Acesso negado: Identidade ambígua detectada no sistema.';
   END IF;
 
-  SELECT id, LOWER(COALESCE(cargo, tipo::text)), filial_id INTO v_user_id, v_user_cargo, v_user_filial_id
+  SELECT id, LOWER(tipo::text), filial_id INTO v_user_id, v_user_cargo, v_user_filial_id
   FROM public.usuarios
   WHERE email = v_user_email AND ativo = true;
 
@@ -515,7 +513,7 @@ BEGIN
     RAISE EXCEPTION 'Acesso negado: Identidade ambígua detectada no sistema.';
   END IF;
 
-  SELECT id, LOWER(COALESCE(cargo, tipo::text)), filial_id INTO v_user_id, v_user_cargo, v_user_filial_id
+  SELECT id, LOWER(tipo::text), filial_id INTO v_user_id, v_user_cargo, v_user_filial_id
   FROM public.usuarios
   WHERE email = v_user_email AND ativo = true;
 
@@ -714,7 +712,7 @@ BEGIN
     RAISE EXCEPTION 'Acesso negado: Identidade ambígua detectada no sistema.';
   END IF;
 
-  SELECT id, LOWER(COALESCE(cargo, tipo::text)), filial_id INTO v_user_id, v_user_cargo, v_user_filial_id
+  SELECT id, LOWER(tipo::text), filial_id INTO v_user_id, v_user_cargo, v_user_filial_id
   FROM public.usuarios
   WHERE email = v_user_email AND ativo = true;
 

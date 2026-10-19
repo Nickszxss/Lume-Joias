@@ -277,3 +277,24 @@ O projeto dispõe de 18 scripts de teste automatizados em Python utilizando a bi
   - O serviço gratuito do Supabase GoTrue aplica limite de envio de e-mails para criação de conta via anon key (HTTP 429 `over_email_send_rate_limit`). Por isso, novos usuários devem ser provisionados administrativamente via script (`migrar_usuarios_supabase.py`) ou console do Supabase.
 - **Persistência de Usuário de Teste:**
   - O usuário `nicoly.teste@empresa.com` existe em `auth.users` e `public.usuarios` para fins de homologação contínua da suíte Playwright.
+
+---
+
+## 14. Arquitetura de Idempotência e Suporte a Retentativas de Conexão
+
+### 14.1. Visão Geral do Mecanismo
+Para garantir a integridade dos saldos de estoque e prevenir movimentações e registros de auditoria duplicados quando ocorrem perdas de conexão de rede, o sistema Lume-Joias utiliza uma arquitetura de idempotência atômica em nível de banco de dados (`PostgreSQL PL/pgSQL`) e cliente frontend (`main.js`).
+
+### 14.2. RPCs com Suporte a Idempotência
+Todas as 5 RPCs críticas de movimentação e criação possuem suporte a chaves de idempotência UUID v4:
+1. `ajustar_estoque_rpc(p_produto_id, p_filial_id, p_tipo, p_quantidade, p_motivo, p_idempotency_key)`
+2. `criar_pedido_compra_rpc(p_filial_id, p_produto_id, p_quantidade, p_idempotency_key)`
+3. `cadastrar_produto_com_estoques_rpc(p_nome, p_sku, p_categoria, p_qtd_minima, p_idempotency_key)`
+4. `concluir_transferencia_rpc(p_transferencia_id, p_observacao, p_idempotency_key)`
+5. `receber_pedido_rpc(p_pedido_id, p_observacao, p_idempotency_key)`
+
+### 14.3. Regras e Garantias de Execução
+- **Advisory Locks Transacionais (`pg_advisory_xact_lock`):** A recepção de uma chave de idempotência aciona um bloqueio transacional determinístico no hash da chave (`hashtext('idempotency:' || p_idempotency_key)`), serializando requisições simultâneas e eliminando condições de corrida.
+- **Validação do Hash de Parâmetros (`md5`):** Se uma chave de idempotência for reenviada com os mesmos parâmetros, o RPC retorna imediatamente o JSON de resposta cacheado em `public.idempotencia_chaves` sem executar novas alterações no banco. Se for reenviada com parâmetros diferentes, a chamada é rejeitada por inconformidade (`RAISE EXCEPTION`).
+- **Validação de Propriedade do Usuário (`usuario_id = v_user_id`):** O banco valida se a chave pertence ao mesmo usuário autenticado, impedindo que usuários mal-intencionados obtenham respostas de chaves geradas por outros usuários.
+- **Ciclo de Vida no Frontend (`main.js`):** O frontend gera UUIDs v4 na abertura de modais (`ajusteIdempotencyKey`, `pedidoIdempotencyKey`, `produtoIdempotencyKey`) ou no clique de botões por item (`concluirTransfKeysMap[id]`, `receberPedidoKeysMap[id]`). A chave é retida durante erros de rede e destruída apenas após a confirmação de sucesso com o servidor.

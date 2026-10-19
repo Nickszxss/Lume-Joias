@@ -5,7 +5,17 @@
 
 BEGIN;
 
--- 1. Habilitar RLS nas 8 tabelas públicas do sistema
+-- Criar tabela de produtos_filiais_inativos com antecedência caso não exista
+CREATE TABLE IF NOT EXISTS public.produtos_filiais_inativos (
+    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    produto_id bigint NOT NULL REFERENCES public.produtos(id) ON DELETE CASCADE,
+    filial_id bigint NOT NULL REFERENCES public.filiais(id) ON DELETE CASCADE,
+    desativado_por bigint REFERENCES public.usuarios(id),
+    created_at timestamptz DEFAULT now(),
+    CONSTRAINT unique_produto_filial_inativo UNIQUE (produto_id, filial_id)
+);
+
+-- 1. Habilitar RLS nas 8 tabelas públicas do sistema + produtos_filiais_inativos
 ALTER TABLE public.usuarios ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.filiais ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.produtos ENABLE ROW LEVEL SECURITY;
@@ -14,6 +24,7 @@ ALTER TABLE public.movimentacoes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.transferencias ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.pedidos_compra ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.itens_pedido_compra ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.produtos_filiais_inativos ENABLE ROW LEVEL SECURITY;
 
 -- Constraint de Integridade do Banco: Validação preventiva estrita com interrupção por RAISE EXCEPTION se houver saldos negativos
 DO $$
@@ -67,7 +78,7 @@ REVOKE EXECUTE ON FUNCTION public.get_auth_user_filial_id() FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.get_auth_user_cargo() TO authenticated;
 GRANT EXECUTE ON FUNCTION public.get_auth_user_filial_id() TO authenticated;
 
--- 3. Bloco PL/pgSQL Idempotente para remover TODAS as políticas preexistentes nas 8 tabelas
+-- 3. Bloco PL/pgSQL Idempotente para remover TODAS as políticas preexistentes nas tabelas
 DO $$
 DECLARE
     pol RECORD;
@@ -86,25 +97,11 @@ BEGIN
     END LOOP;
 END $$;
 
--- Bloco PL/pgSQL Idempotente para remover TODAS as políticas preexistentes de public.usuarios
-DO $$
-DECLARE
-    pol RECORD;
-BEGIN
-    FOR pol IN
-        SELECT policyname
-        FROM pg_policies
-        WHERE schemaname = 'public' AND tablename = 'usuarios'
-    LOOP
-        EXECUTE format('DROP POLICY IF EXISTS %I ON public.usuarios', pol.policyname);
-    END LOOP;
-END $$;
-
 -- 4. REVOGAÇÃO RIGOROSA DE PRIVILÉGIOS RESIDUAIS SOBRE TABELAS E SEQUÊNCIAS
-REVOKE ALL ON public.usuarios, public.filiais, public.produtos, public.estoques, public.movimentacoes, public.transferencias, public.pedidos_compra, public.itens_pedido_compra FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON public.usuarios, public.filiais, public.produtos, public.estoques, public.movimentacoes, public.transferencias, public.pedidos_compra, public.itens_pedido_compra, public.produtos_filiais_inativos FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM PUBLIC, anon, authenticated;
 
--- Permissões estritas em sequências vinculadas explicitamente a colunas (refobjsubid > 0 e deptype 'a'/'i') das 8 tabelas do Lume-Joias
+-- Permissões estritas em sequências vinculadas explicitamente a colunas das tabelas do Lume-Joias
 DO $$
 DECLARE
     seq RECORD;
@@ -154,14 +151,14 @@ FOR UPDATE USING (
     email = (auth.jwt() ->> 'email') AND
     cargo IS NOT DISTINCT FROM public.get_auth_user_cargo() AND
     filial_id IS NOT DISTINCT FROM public.get_auth_user_filial_id() AND
-    tipo IS NOT DISTINCT FROM public.get_auth_user_cargo() AND
+    tipo::text IS NOT DISTINCT FROM public.get_auth_user_cargo() AND
     ativo = true
   ) OR
   (
     public.get_auth_user_cargo() = 'gerente' AND
     filial_id IS NOT DISTINCT FROM public.get_auth_user_filial_id() AND
     cargo = 'funcionario' AND
-    tipo = 'funcionario'
+    tipo::text = 'funcionario'
   )
 );
 
@@ -171,7 +168,7 @@ REVOKE UPDATE (id, nome, email, senha, cargo, tipo, filial_id, ativo, created_at
 GRANT SELECT (id, nome, email, cargo, tipo, filial_id, ativo, created_at) ON public.usuarios TO authenticated;
 GRANT UPDATE (nome) ON public.usuarios TO authenticated;
 
--- 6. POLÍTICAS E CONCESSÕES DAS TABELAS 'filiais' E 'produtos'
+-- 6. POLÍTICAS E CONCESSÕES DAS TABELAS 'filiais', 'produtos' E 'produtos_filiais_inativos'
 CREATE POLICY "Leitura Publica Filiais" ON public.filiais FOR SELECT USING (true);
 GRANT SELECT ON public.filiais TO anon, authenticated;
 
@@ -191,17 +188,6 @@ GRANT SELECT ON public.produtos TO anon, authenticated;
 GRANT INSERT, UPDATE ON public.produtos TO authenticated;
 
 -- Tabela e Políticas para Inativação/Retirada de Uso Local de Produtos por Filial
-CREATE TABLE IF NOT EXISTS public.produtos_filiais_inativos (
-    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    produto_id bigint NOT NULL REFERENCES public.produtos(id) ON DELETE CASCADE,
-    filial_id bigint NOT NULL REFERENCES public.filiais(id) ON DELETE CASCADE,
-    desativado_por bigint REFERENCES public.usuarios(id),
-    created_at timestamptz DEFAULT now(),
-    CONSTRAINT unique_produto_filial_inativo UNIQUE (produto_id, filial_id)
-);
-
-ALTER TABLE public.produtos_filiais_inativos ENABLE ROW LEVEL SECURITY;
-
 CREATE POLICY "Leitura Inativos Estrita por Filial" ON public.produtos_filiais_inativos
 FOR SELECT USING (
   filial_id = public.get_auth_user_filial_id()
@@ -221,7 +207,6 @@ FOR DELETE USING (
 
 GRANT SELECT, INSERT, DELETE ON public.produtos_filiais_inativos TO authenticated;
 
-
 -- 7. POLÍTICAS E CONCESSÕES DA TABELA 'estoques'
 CREATE POLICY "Leitura Estoques por Perfil" ON public.estoques
 FOR SELECT USING (
@@ -239,7 +224,6 @@ FOR INSERT WITH CHECK (
 );
 
 -- Bloquear UPDATE direto na tabela e em todas as colunas de public.estoques
--- (Alterações de saldo DEVEM obrigatoriamente ser executadas via RPCs atômicas SECURITY DEFINER)
 REVOKE ALL ON public.estoques FROM PUBLIC, anon, authenticated;
 REVOKE UPDATE (id, filial_id, produto_id, quantidade, status, updated_at) ON public.estoques FROM PUBLIC, anon, authenticated;
 
@@ -247,8 +231,6 @@ GRANT SELECT, INSERT ON public.estoques TO authenticated;
 GRANT SELECT ON public.estoques TO anon;
 
 -- RPC Transacional Atômico para Ajuste de Estoque
--- RPC Transacional Atômico para Ajuste de Estoque (Endurecido - P0 Autorização & Concorrência)
--- Proteção estrita por filial, validação de ativos e bloqueio transacional por chave de advisory lock para linhas inexistentes.
 CREATE OR REPLACE FUNCTION public.ajustar_estoque_rpc(
   p_produto_id bigint,
   p_filial_id bigint,
@@ -268,8 +250,10 @@ DECLARE
   v_user_filial_id bigint;
   v_filial_ativa boolean;
   v_prod_ativo boolean;
+  v_qtd_minima integer;
   v_qtd_ant integer;
   v_qtd_nova integer;
+  v_status text;
   v_lock_key bigint;
 BEGIN
   -- 1. Autenticação e Verificação de Usuário
@@ -315,7 +299,7 @@ BEGIN
     RAISE EXCEPTION 'Operacao negada: Filial ID % esta inativa.', p_filial_id;
   END IF;
 
-  SELECT ativo INTO v_prod_ativo FROM public.produtos WHERE id = p_produto_id LIMIT 1;
+  SELECT ativo, qtd_minima INTO v_prod_ativo, v_qtd_minima FROM public.produtos WHERE id = p_produto_id LIMIT 1;
   IF v_prod_ativo IS NULL THEN
     RAISE EXCEPTION 'Operacao negada: Produto ID % nao encontrado.', p_produto_id;
   END IF;
@@ -323,12 +307,11 @@ BEGIN
     RAISE EXCEPTION 'Operacao negada: Produto ID % esta inativo e nao pode receber ajustes de estoque.', p_produto_id;
   END IF;
 
-  -- 3. Proteção contra Concorrência em Registros Inexistentes (P0 Concorrência)
-  -- Bloqueio transacional advisory lock baseado na chave composta (p_filial_id, p_produto_id)
+  -- 4. Proteção contra Concorrência em Registros Inexistentes
   v_lock_key := pg_catalog.hashtext(p_filial_id::text || '_' || p_produto_id::text);
   PERFORM pg_catalog.pg_advisory_xact_lock(v_lock_key);
 
-  -- 4. Obter e bloquear linha existente do estoque
+  -- 5. Obter e bloquear linha existente do estoque
   SELECT quantidade INTO v_qtd_ant
   FROM public.estoques
   WHERE filial_id = p_filial_id AND produto_id = p_produto_id
@@ -347,15 +330,22 @@ BEGIN
     v_qtd_nova := v_qtd_ant + p_quantidade;
   END IF;
 
-  -- 5. Atualizar ou inserir estoque de forma atômica
+  -- Calcular status do estoque com base nas 3 regras: zerado, baixo e suficiente
+  v_status := CASE
+    WHEN v_qtd_nova = 0 THEN 'zerado'
+    WHEN v_qtd_nova <= COALESCE(v_qtd_minima, 0) THEN 'baixo'
+    ELSE 'suficiente'
+  END;
+
+  -- 6. Atualizar ou inserir estoque de forma atômica
   INSERT INTO public.estoques (filial_id, produto_id, quantidade, status, updated_at)
-  VALUES (p_filial_id, p_produto_id, v_qtd_nova, CASE WHEN v_qtd_nova = 0 THEN 'zerado' ELSE 'suficiente' END, now())
+  VALUES (p_filial_id, p_produto_id, v_qtd_nova, v_status::public.status_estoque, now())
   ON CONFLICT (filial_id, produto_id) DO UPDATE
   SET quantidade = EXCLUDED.quantidade,
       status = EXCLUDED.status,
       updated_at = now();
 
-  -- 6. Registrar movimentação auditável na mesma transação
+  -- 7. Registrar movimentação auditável na mesma transação
   INSERT INTO public.movimentacoes (produto_id, filial_id, usuario_id, tipo, quantidade, quantidade_anterior, quantidade_nova, motivo, created_at)
   VALUES (p_produto_id, p_filial_id, v_user_id, p_tipo, p_quantidade, v_qtd_ant, v_qtd_nova, COALESCE(p_motivo, 'Ajuste manual de estoque'), now());
 
@@ -378,8 +368,6 @@ FOR SELECT USING (
   filial_id = public.get_auth_user_filial_id()
 );
 
--- Inserção direta bloqueada no SDK REST para evitar forja de histórico.
--- Registros de movimentações DEVEM obrigatoriamente ser gerados via RPCs SECURITY DEFINER.
 REVOKE ALL ON public.movimentacoes FROM PUBLIC, anon, authenticated;
 GRANT SELECT ON public.movimentacoes TO authenticated;
 
@@ -399,15 +387,13 @@ FOR INSERT WITH CHECK (
   ) AND
   origem_id != destino_id AND
   quantidade > 0 AND
-  status = 'pendente'
+  status::text = 'solicitada'
 );
 
 GRANT SELECT, INSERT ON public.transferencias TO authenticated;
--- Bloquear UPDATE direto na tabela transferencias (Conclusão DEVE obrigatoriamente usar concluir_transferencia_rpc)
 REVOKE UPDATE ON public.transferencias FROM PUBLIC, anon, authenticated;
 
 -- RPC Transacional Atômico para Conclusão de Transferência
--- Valida saldo de origem com SELECT FOR UPDATE, calcula quantidades reais anteriores/posteriores, garante idempotência e rollback integral.
 CREATE OR REPLACE FUNCTION public.concluir_transferencia_rpc(
   p_transferencia_id bigint,
   p_observacao text DEFAULT NULL
@@ -423,10 +409,13 @@ DECLARE
   v_user_id bigint;
   v_user_cargo text;
   v_user_filial_id bigint;
+  v_prod_qtd_minima integer;
   v_origem_qtd_ant integer;
   v_origem_qtd_nova integer;
+  v_origem_status text;
   v_dest_qtd_ant integer;
   v_dest_qtd_nova integer;
+  v_dest_status text;
 BEGIN
   v_user_email := (auth.jwt() ->> 'email');
   IF v_user_email IS NULL THEN
@@ -452,11 +441,15 @@ BEGIN
     RAISE EXCEPTION 'Transferencia ID % nao encontrada.', p_transferencia_id;
   END IF;
 
-  IF v_transf.status = 'concluida' THEN
+  IF v_transf.status::text = 'concluida' THEN
     RAISE EXCEPTION 'Operacao negada: Transferencia ID % ja foi concluida anteriormente em %.', p_transferencia_id, v_transf.concluida_at;
   END IF;
 
-  IF v_transf.status != 'pendente' THEN
+  IF v_transf.status::text = 'cancelada' THEN
+    RAISE EXCEPTION 'Operacao negada: Transferencia ID % esta cancelada.', p_transferencia_id;
+  END IF;
+
+  IF v_transf.status::text != 'solicitada' THEN
     RAISE EXCEPTION 'Operacao negada: Transferencia ID % possui status invalido (%) para conclusao.', p_transferencia_id, v_transf.status;
   END IF;
 
@@ -467,6 +460,9 @@ BEGIN
   IF v_user_cargo != 'gerente' AND v_user_filial_id != v_transf.destino_id THEN
     RAISE EXCEPTION 'Acesso negado: Somente gerentes ou funcionarios da filial de destino podem concluir a transferencia.';
   END IF;
+
+  -- Obter qtd_minima do produto
+  SELECT qtd_minima INTO v_prod_qtd_minima FROM public.produtos WHERE id = v_transf.produto_id LIMIT 1;
 
   -- 2. Advisory Lock determinístico em ordem de ID de filial para prevenir deadlock entre origem e destino
   IF v_transf.origem_id < v_transf.destino_id THEN
@@ -492,6 +488,11 @@ BEGIN
   END IF;
 
   v_origem_qtd_nova := v_origem_qtd_ant - v_transf.quantidade;
+  v_origem_status := CASE
+    WHEN v_origem_qtd_nova = 0 THEN 'zerado'
+    WHEN v_origem_qtd_nova <= COALESCE(v_prod_qtd_minima, 0) THEN 'baixo'
+    ELSE 'suficiente'
+  END;
 
   -- 4. Bloquear e calcular estoque do destino
   SELECT COALESCE(
@@ -500,30 +501,35 @@ BEGIN
   ) INTO v_dest_qtd_ant;
 
   v_dest_qtd_nova := v_dest_qtd_ant + v_transf.quantidade;
+  v_dest_status := CASE
+    WHEN v_dest_qtd_nova = 0 THEN 'zerado'
+    WHEN v_dest_qtd_nova <= COALESCE(v_prod_qtd_minima, 0) THEN 'baixo'
+    ELSE 'suficiente'
+  END;
 
   -- 5. Atualizar estoque da origem com status padronizado
   UPDATE public.estoques
   SET quantidade = v_origem_qtd_nova,
-      status = CASE WHEN v_origem_qtd_nova = 0 THEN 'zerado' ELSE 'suficiente' END,
+      status = v_origem_status::public.status_estoque,
       updated_at = now()
   WHERE filial_id = v_transf.origem_id AND produto_id = v_transf.produto_id;
 
   -- 6. Atualizar/Inserir estoque do destino com status padronizado
   INSERT INTO public.estoques (filial_id, produto_id, quantidade, status, updated_at)
-  VALUES (v_transf.destino_id, v_transf.produto_id, v_dest_qtd_nova, CASE WHEN v_dest_qtd_nova = 0 THEN 'zerado' ELSE 'suficiente' END, now())
+  VALUES (v_transf.destino_id, v_transf.produto_id, v_dest_qtd_nova, v_dest_status::public.status_estoque, now())
   ON CONFLICT (filial_id, produto_id) DO UPDATE
   SET quantidade = EXCLUDED.quantidade,
       status = EXCLUDED.status,
       updated_at = now();
 
-  -- 6. Registrar movimentações auditáveis com saldos anteriores e posteriores REAIS
+  -- 7. Registrar movimentações auditáveis com saldos anteriores e posteriores REAIS
   INSERT INTO public.movimentacoes (produto_id, filial_id, usuario_id, tipo, quantidade, quantidade_anterior, quantidade_nova, motivo, created_at)
   VALUES (v_transf.produto_id, v_transf.origem_id, v_user_id, 'saida', v_transf.quantidade, v_origem_qtd_ant, v_origem_qtd_nova, COALESCE(p_observacao, 'Transferencia Concluida (Saida Origem)'), now());
 
   INSERT INTO public.movimentacoes (produto_id, filial_id, usuario_id, tipo, quantidade, quantidade_anterior, quantidade_nova, motivo, created_at)
   VALUES (v_transf.produto_id, v_transf.destino_id, v_user_id, 'entrada', v_transf.quantidade, v_dest_qtd_ant, v_dest_qtd_nova, COALESCE(p_observacao, 'Transferencia Concluida (Entrada Destino)'), now());
 
-  -- 7. Marcar transferencia como concluida
+  -- 8. Marcar transferencia como concluida
   UPDATE public.transferencias
   SET status = 'concluida',
       observacao = COALESCE(p_observacao, observacao),
@@ -547,11 +553,10 @@ FOR SELECT USING (
 CREATE POLICY "Insercao Pedidos Compra Apenas Gerente" ON public.pedidos_compra
 FOR INSERT WITH CHECK (
   public.get_auth_user_cargo() = 'gerente' AND
-  status = 'aberto'
+  status::text = 'aberto'
 );
 
 GRANT SELECT, INSERT ON public.pedidos_compra TO authenticated;
--- Bloquear UPDATE direto na tabela pedidos_compra (Recebimento DEVE obrigatoriamente usar receber_pedido_rpc)
 REVOKE UPDATE ON public.pedidos_compra FROM PUBLIC, anon, authenticated;
 
 CREATE POLICY "Leitura Itens Pedido Compra por Perfil" ON public.itens_pedido_compra
@@ -571,7 +576,7 @@ FOR INSERT WITH CHECK (
   EXISTS (
     SELECT 1 FROM public.pedidos_compra p
     WHERE p.id = itens_pedido_compra.pedido_id
-      AND p.status = 'aberto'
+      AND p.status::text = 'aberto'
       AND (
         public.get_auth_user_cargo() = 'gerente' OR
         p.filial_id = public.get_auth_user_filial_id()
@@ -582,7 +587,6 @@ FOR INSERT WITH CHECK (
 GRANT SELECT, INSERT ON public.itens_pedido_compra TO authenticated;
 
 -- RPC Transacional Atômico para Recebimento de Pedido de Compra
--- Rejeita pedidos sem itens, valida quantidades/produtos, calcula saldos anteriores/posteriores reais, garante rollback e idempotência.
 CREATE OR REPLACE FUNCTION public.receber_pedido_rpc(
   p_pedido_id bigint,
   p_observacao text DEFAULT NULL
@@ -600,8 +604,10 @@ DECLARE
   v_user_cargo text;
   v_user_filial_id bigint;
   v_items_count integer;
+  v_prod_qtd_minima integer;
   v_dest_qtd_ant integer;
   v_dest_qtd_nova integer;
+  v_dest_status text;
 BEGIN
   v_user_email := (auth.jwt() ->> 'email');
   IF v_user_email IS NULL THEN
@@ -627,11 +633,15 @@ BEGIN
     RAISE EXCEPTION 'Pedido de compra ID % nao encontrado.', p_pedido_id;
   END IF;
 
-  IF v_pedido.status = 'recebido' THEN
+  IF v_pedido.status::text = 'recebido' THEN
     RAISE EXCEPTION 'Operacao negada: Pedido ID % ja foi recebido anteriormente em %.', p_pedido_id, v_pedido.recebido_at;
   END IF;
 
-  IF v_pedido.status != 'aberto' THEN
+  IF v_pedido.status::text = 'cancelado' THEN
+    RAISE EXCEPTION 'Operacao negada: Pedido ID % esta cancelado.', p_pedido_id;
+  END IF;
+
+  IF v_pedido.status::text != 'aberto' THEN
     RAISE EXCEPTION 'Operacao negada: Pedido ID % possui status invalido (%) para recebimento.', p_pedido_id, v_pedido.status;
   END IF;
 
@@ -656,6 +666,8 @@ BEGIN
       RAISE EXCEPTION 'Operacao negada: Item ID % possui quantidade invalida (%).', v_item.id, v_item.quantidade;
     END IF;
 
+    SELECT qtd_minima INTO v_prod_qtd_minima FROM public.produtos WHERE id = v_item.produto_id LIMIT 1;
+
     -- Advisory Lock transacional por chave de produto/filial
     PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtext(v_pedido.filial_id::text || '_' || v_item.produto_id::text));
 
@@ -666,10 +678,15 @@ BEGIN
     ) INTO v_dest_qtd_ant;
 
     v_dest_qtd_nova := v_dest_qtd_ant + v_item.quantidade;
+    v_dest_status := CASE
+      WHEN v_dest_qtd_nova = 0 THEN 'zerado'
+      WHEN v_dest_qtd_nova <= COALESCE(v_prod_qtd_minima, 0) THEN 'baixo'
+      ELSE 'suficiente'
+    END;
 
     -- Incrementar estoque com status padronizado
     INSERT INTO public.estoques (filial_id, produto_id, quantidade, status, updated_at)
-    VALUES (v_pedido.filial_id, v_item.produto_id, v_dest_qtd_nova, CASE WHEN v_dest_qtd_nova = 0 THEN 'zerado' ELSE 'suficiente' END, now())
+    VALUES (v_pedido.filial_id, v_item.produto_id, v_dest_qtd_nova, v_dest_status::public.status_estoque, now())
     ON CONFLICT (filial_id, produto_id) DO UPDATE
     SET quantidade = EXCLUDED.quantidade,
         status = EXCLUDED.status,
@@ -684,8 +701,7 @@ BEGIN
   UPDATE public.pedidos_compra
   SET status = 'recebido',
       observacao = COALESCE(p_observacao, observacao),
-      recebido_at = now(),
-      recebido_por = v_user_id
+      recebido_at = now()
   WHERE id = p_pedido_id;
 
   RETURN json_build_object('success', true, 'message', 'Pedido de compra recebido com sucesso.', 'pedido_id', p_pedido_id);

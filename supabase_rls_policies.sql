@@ -43,8 +43,20 @@ CREATE TABLE IF NOT EXISTS public.produtos_filiais_inativos (
     CONSTRAINT unique_produto_filial_inativo UNIQUE (produto_id, filial_id)
 );
 
--- Habilitar RLS nas 8 tabelas públicas do sistema + produtos_filiais_inativos
+-- Tabela para Armazenamento de Chaves de Idempotência
+CREATE TABLE IF NOT EXISTS public.idempotencia_chaves (
+    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    chave text NOT NULL UNIQUE,
+    usuario_id bigint REFERENCES public.usuarios(id),
+    escopo text NOT NULL,
+    parametros_hash text NOT NULL,
+    resultado_json json NOT NULL,
+    created_at timestamptz DEFAULT now()
+);
+
+-- Habilitar RLS nas 8 tabelas públicas do sistema + produtos_filiais_inativos + idempotencia_chaves
 ALTER TABLE public.usuarios ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.idempotencia_chaves ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.filiais ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.produtos ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.estoques ENABLE ROW LEVEL SECURITY;
@@ -330,13 +342,14 @@ REVOKE UPDATE (id, filial_id, produto_id, quantidade, status, updated_at) ON pub
 GRANT SELECT, INSERT ON public.estoques TO authenticated;
 GRANT SELECT ON public.estoques TO anon;
 
--- RPC Transacional Atômico para Ajuste de Estoque
+-- RPC Transacional Atômico para Ajuste de Estoque com Suporte a Idempotência
 CREATE OR REPLACE FUNCTION public.ajustar_estoque_rpc(
   p_produto_id bigint,
   p_filial_id bigint,
   p_tipo text,
   p_quantidade integer,
-  p_motivo text DEFAULT NULL
+  p_motivo text DEFAULT NULL,
+  p_idempotency_key text DEFAULT NULL
 )
 RETURNS json
 LANGUAGE plpgsql
@@ -356,6 +369,9 @@ DECLARE
   v_qtd_nova integer;
   v_status text;
   v_lock_key bigint;
+  v_params_hash text;
+  v_idempotent_rec record;
+  v_resultado json;
 BEGIN
   -- 1. Autenticação e Verificação Estrita de Unicidade de Usuário por auth.uid()
   v_auth_uid := auth.uid();
@@ -382,6 +398,24 @@ BEGIN
     RAISE EXCEPTION 'Acesso negado: Usuario nao possui permissao para ajustar o estoque de outra filial (Filial Alvo: %, Sua Filial: %).', p_filial_id, v_user_filial_id;
   END IF;
 
+  -- Checagem de Idempotência
+  IF p_idempotency_key IS NOT NULL AND TRIM(p_idempotency_key) != '' THEN
+    PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtext('idempotency:' || p_idempotency_key));
+    v_params_hash := md5('ajustar_estoque:' || COALESCE(p_produto_id::text, '') || ':' || COALESCE(p_filial_id::text, '') || ':' || COALESCE(p_tipo, '') || ':' || COALESCE(p_quantidade::text, '') || ':' || COALESCE(p_motivo, ''));
+
+    SELECT * INTO v_idempotent_rec
+    FROM public.idempotencia_chaves
+    WHERE chave = p_idempotency_key;
+
+    IF FOUND THEN
+      IF v_idempotent_rec.parametros_hash = v_params_hash THEN
+        RETURN v_idempotent_rec.resultado_json;
+      ELSE
+        RAISE EXCEPTION 'Operacao negada: A chave de idempotencia % ja foi utilizada com parametros diferentes.', p_idempotency_key;
+      END IF;
+    END IF;
+  END IF;
+
   -- 2. Validação Estrita de Parâmetros de Entrada
   IF p_produto_id IS NULL THEN
     RAISE EXCEPTION 'Operacao negada: ID do produto e obrigatorio.';
@@ -394,6 +428,9 @@ BEGIN
   END IF;
   IF p_quantidade IS NULL OR p_quantidade <= 0 THEN
     RAISE EXCEPTION 'Operacao negada: Quantidade de ajuste deve ser um inteiro maior que zero.';
+  END IF;
+  IF p_motivo IS NULL OR TRIM(p_motivo) = '' THEN
+    RAISE EXCEPTION 'Operacao negada: Motivo do ajuste de estoque e obrigatorio.';
   END IF;
 
   -- 3. Validação de Filial e Produto Ativos no Catálogo Global
@@ -455,17 +492,25 @@ BEGIN
   INSERT INTO public.movimentacoes (produto_id, filial_id, usuario_id, tipo, quantidade, quantidade_anterior, quantidade_nova, motivo, created_at)
   VALUES (p_produto_id, p_filial_id, v_user_id, p_tipo, p_quantidade, v_qtd_ant, v_qtd_nova, COALESCE(p_motivo, 'Ajuste manual de estoque'), now());
 
-  RETURN json_build_object(
+  v_resultado := json_build_object(
     'success', true,
     'message', 'Estoque ajustado com sucesso.',
     'quantidade_anterior', v_qtd_ant,
     'quantidade_nova', v_qtd_nova
   );
+
+  IF p_idempotency_key IS NOT NULL AND TRIM(p_idempotency_key) != '' THEN
+    INSERT INTO public.idempotencia_chaves (chave, usuario_id, escopo, parametros_hash, resultado_json)
+    VALUES (p_idempotency_key, v_user_id, 'ajustar_estoque', v_params_hash, v_resultado)
+    ON CONFLICT (chave) DO NOTHING;
+  END IF;
+
+  RETURN v_resultado;
 END;
 $$;
 
-REVOKE EXECUTE ON FUNCTION public.ajustar_estoque_rpc(bigint, bigint, text, integer, text) FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.ajustar_estoque_rpc(bigint, bigint, text, integer, text) TO authenticated;
+REVOKE EXECUTE ON FUNCTION public.ajustar_estoque_rpc(bigint, bigint, text, integer, text, text) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.ajustar_estoque_rpc(bigint, bigint, text, integer, text, text) TO authenticated;
 
 -- 8. POLÍTICAS E CONCESSÕES DA TABELA 'movimentacoes'
 CREATE POLICY "Leitura Movimentacoes por Perfil" ON public.movimentacoes
@@ -564,6 +609,10 @@ BEGIN
 
   IF v_transf.status::text != 'solicitada' THEN
     RAISE EXCEPTION 'Operacao negada: Transferencia ID % possui status invalido (%) para conclusao.', p_transferencia_id, v_transf.status;
+  END IF;
+
+  IF v_transf.origem_id = v_transf.destino_id THEN
+    RAISE EXCEPTION 'Operacao negada: Transferencia ID % possui origem e destino identicos (Filial ID %).', p_transferencia_id, v_transf.origem_id;
   END IF;
 
   IF v_transf.quantidade <= 0 THEN
@@ -828,8 +877,250 @@ BEGIN
 END;
 $$;
 
-REVOKE EXECUTE ON FUNCTION public.ajustar_estoque_rpc(bigint, bigint, text, integer, text) FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.ajustar_estoque_rpc(bigint, bigint, text, integer, text) TO authenticated;
+-- RPC Transacional Atômico para Criação de Pedido de Compra com Itens e Idempotência
+CREATE OR REPLACE FUNCTION public.criar_pedido_compra_rpc(
+  p_filial_id bigint,
+  p_produto_id bigint,
+  p_quantidade integer,
+  p_idempotency_key text DEFAULT NULL
+)
+RETURNS json
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+DECLARE
+  v_auth_uid uuid;
+  v_user_count integer;
+  v_user_id bigint;
+  v_user_cargo text;
+  v_user_filial_id bigint;
+  v_pedido_id bigint;
+  v_params_hash text;
+  v_idempotent_rec record;
+  v_resultado json;
+BEGIN
+  v_auth_uid := auth.uid();
+  IF v_auth_uid IS NULL THEN
+    RAISE EXCEPTION 'Acesso negado: Usuario nao autenticado.';
+  END IF;
+
+  SELECT count(*) INTO v_user_count
+  FROM public.usuarios
+  WHERE auth_user_id = v_auth_uid AND ativo = true;
+
+  IF v_user_count = 0 THEN
+    RAISE EXCEPTION 'Acesso negado: Conta invalida, inativa ou sem vinculo Auth.';
+  ELSIF v_user_count > 1 THEN
+    RAISE EXCEPTION 'Acesso negado: Identidade ambígua detectada no sistema.';
+  END IF;
+
+  SELECT id, LOWER(tipo::text), filial_id INTO v_user_id, v_user_cargo, v_user_filial_id
+  FROM public.usuarios
+  WHERE auth_user_id = v_auth_uid AND ativo = true;
+
+  IF v_user_cargo != 'gerente' THEN
+    RAISE EXCEPTION 'Acesso negado: Apenas gerentes possuem permissao para criar pedidos de compra.';
+  END IF;
+
+  IF p_filial_id IS NULL THEN
+    RAISE EXCEPTION 'Operacao negada: ID da filial e obrigatorio.';
+  END IF;
+  IF p_produto_id IS NULL THEN
+    RAISE EXCEPTION 'Operacao negada: ID do produto e obrigatorio.';
+  END IF;
+  IF p_quantidade IS NULL OR p_quantidade <= 0 THEN
+    RAISE EXCEPTION 'Operacao negada: Quantidade deve ser um inteiro maior que zero.';
+  END IF;
+
+  -- Checagem de Idempotência
+  IF p_idempotency_key IS NOT NULL AND TRIM(p_idempotency_key) != '' THEN
+    PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtext('idempotency:' || p_idempotency_key));
+    v_params_hash := md5('criar_pedido:' || COALESCE(p_filial_id::text, '') || ':' || COALESCE(p_produto_id::text, '') || ':' || COALESCE(p_quantidade::text, ''));
+
+    SELECT * INTO v_idempotent_rec
+    FROM public.idempotencia_chaves
+    WHERE chave = p_idempotency_key;
+
+    IF FOUND THEN
+      IF v_idempotent_rec.parametros_hash = v_params_hash THEN
+        RETURN v_idempotent_rec.resultado_json;
+      ELSE
+        RAISE EXCEPTION 'Operacao negada: A chave de idempotencia % ja foi utilizada com parametros diferentes.', p_idempotency_key;
+      END IF;
+    END IF;
+  END IF;
+
+  -- Inserir o pedido de compra (cabeçalho)
+  INSERT INTO public.pedidos_compra (filial_id, usuario_id, status, created_at)
+  VALUES (p_filial_id, v_user_id, 'aberto', now())
+  RETURNING id INTO v_pedido_id;
+
+  -- Inserir o item do pedido
+  INSERT INTO public.itens_pedido_compra (pedido_id, produto_id, quantidade, created_at)
+  VALUES (v_pedido_id, p_produto_id, p_quantidade, now());
+
+  v_resultado := json_build_object(
+    'success', true,
+    'message', 'Pedido de compra criado com sucesso.',
+    'pedido_id', v_pedido_id
+  );
+
+  IF p_idempotency_key IS NOT NULL AND TRIM(p_idempotency_key) != '' THEN
+    INSERT INTO public.idempotencia_chaves (chave, usuario_id, escopo, parametros_hash, resultado_json)
+    VALUES (p_idempotency_key, v_user_id, 'criar_pedido', v_params_hash, v_resultado)
+    ON CONFLICT (chave) DO NOTHING;
+  END IF;
+
+  RETURN v_resultado;
+END;
+$$;
+
+-- RPC Transacional Atômico para Cadastrar Produto e Criar Estoque Inicial em 5 Filiais
+CREATE OR REPLACE FUNCTION public.cadastrar_produto_com_estoques_rpc(
+  p_nome text,
+  p_sku text,
+  p_categoria text DEFAULT 'Geral',
+  p_qtd_minima integer DEFAULT 10,
+  p_idempotency_key text DEFAULT NULL
+)
+RETURNS json
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+DECLARE
+  v_auth_uid uuid;
+  v_user_count integer;
+  v_user_id bigint;
+  v_user_cargo text;
+  v_user_filial_id bigint;
+  v_prod_id bigint;
+  v_filial_rec record;
+  v_filial_count integer;
+  v_params_hash text;
+  v_idempotent_rec record;
+  v_resultado json;
+BEGIN
+  v_auth_uid := auth.uid();
+  IF v_auth_uid IS NULL THEN
+    RAISE EXCEPTION 'Acesso negado: Usuario nao autenticado.';
+  END IF;
+
+  SELECT count(*) INTO v_user_count
+  FROM public.usuarios
+  WHERE auth_user_id = v_auth_uid AND ativo = true;
+
+  IF v_user_count = 0 THEN
+    RAISE EXCEPTION 'Acesso negado: Conta invalida, inativa ou sem vinculo Auth.';
+  ELSIF v_user_count > 1 THEN
+    RAISE EXCEPTION 'Acesso negado: Identidade ambígua detectada no sistema.';
+  END IF;
+
+  SELECT id, LOWER(tipo::text), filial_id INTO v_user_id, v_user_cargo, v_user_filial_id
+  FROM public.usuarios
+  WHERE auth_user_id = v_auth_uid AND ativo = true;
+
+  IF v_user_cargo != 'gerente' THEN
+    RAISE EXCEPTION 'Acesso negado: Apenas gerentes possuem permissao para cadastrar produtos.';
+  END IF;
+
+  IF p_nome IS NULL OR TRIM(p_nome) = '' THEN
+    RAISE EXCEPTION 'Operacao negada: Nome do produto e obrigatorio.';
+  END IF;
+  IF p_sku IS NULL OR TRIM(p_sku) = '' THEN
+    RAISE EXCEPTION 'Operacao negada: SKU/Codigo do produto e obrigatorio.';
+  END IF;
+  IF p_qtd_minima IS NULL OR p_qtd_minima < 0 THEN
+    RAISE EXCEPTION 'Operacao negada: Quantidade minima deve ser um inteiro maior ou igual a zero.';
+  END IF;
+
+  -- Checagem de Idempotência
+  IF p_idempotency_key IS NOT NULL AND TRIM(p_idempotency_key) != '' THEN
+    PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtext('idempotency:' || p_idempotency_key));
+    v_params_hash := md5('cadastrar_produto:' || TRIM(p_nome) || ':' || TRIM(p_sku) || ':' || COALESCE(p_categoria, 'Geral') || ':' || p_qtd_minima::text);
+
+    SELECT * INTO v_idempotent_rec
+    FROM public.idempotencia_chaves
+    WHERE chave = p_idempotency_key;
+
+    IF FOUND THEN
+      IF v_idempotent_rec.parametros_hash = v_params_hash THEN
+        RETURN v_idempotent_rec.resultado_json;
+      ELSE
+        RAISE EXCEPTION 'Operacao negada: A chave de idempotencia % ja foi utilizada com parametros diferentes.', p_idempotency_key;
+      END IF;
+    END IF;
+  END IF;
+
+  -- Verificar se exatamente as 5 filiais oficiais (IDs 1 a 5) existem
+  SELECT count(*) INTO v_filial_count
+  FROM public.filiais
+  WHERE id IN (1, 2, 3, 4, 5);
+
+  IF v_filial_count < 5 THEN
+    RAISE EXCEPTION 'Operacao negada: Filiais oficiais (1 a 5) nao foram encontradas no sistema.';
+  END IF;
+
+  -- Derivar e validar categoria oficial do produto a partir do nome
+  DECLARE
+    v_nome_lower text := LOWER(TRIM(p_nome));
+    v_cat_derivada text;
+  BEGIN
+    IF v_nome_lower LIKE '%anel%' THEN v_cat_derivada := 'ANEL';
+    ELSIF v_nome_lower LIKE '%pulseira%' THEN v_cat_derivada := 'PULSEIRA';
+    ELSIF v_nome_lower LIKE '%solitária%' OR v_nome_lower LIKE '%solitaria%' THEN v_cat_derivada := 'SOLITARIA';
+    ELSIF v_nome_lower LIKE '%colar%' THEN v_cat_derivada := 'COLAR';
+    ELSIF v_nome_lower LIKE '%brinco%' THEN v_cat_derivada := 'BRINCO';
+    ELSE
+      RAISE EXCEPTION 'Operacao negada: Nome do produto nao corresponde a uma categoria permitida (Anel, Pulseira, Solitaria, Colar, Brinco).';
+    END IF;
+
+    -- Inserir o novo produto no catálogo global com a categoria derivada em descricao
+    BEGIN
+      INSERT INTO public.produtos (nome, codigo, descricao, qtd_minima, unidade_medida, ativo, created_at)
+      VALUES (TRIM(p_nome), TRIM(p_sku), v_cat_derivada, p_qtd_minima, 'unidade', true, now())
+      RETURNING id INTO v_prod_id;
+    EXCEPTION
+      WHEN unique_violation THEN
+        RAISE EXCEPTION 'Nao foi possivel cadastrar o produto porque o codigo/SKU % ja esta em uso.', TRIM(p_sku);
+    END;
+  END;
+
+  -- Criar exatamente 1 registro de estoque inicial (quantidade = 0) para cada uma das 5 filiais oficiais
+  FOR v_filial_rec IN
+    SELECT id FROM public.filiais WHERE id IN (1, 2, 3, 4, 5) ORDER BY id ASC
+  LOOP
+    INSERT INTO public.estoques (filial_id, produto_id, quantidade, status, updated_at)
+    VALUES (v_filial_rec.id, v_prod_id, 0, 'zerado'::public.status_estoque, now());
+  END LOOP;
+
+  v_resultado := json_build_object(
+    'success', true,
+    'message', 'Produto cadastrado com sucesso com estoque inicial nas 5 filiais.',
+    'produto_id', v_prod_id,
+    'sku', TRIM(p_sku),
+    'nome', TRIM(p_nome)
+  );
+
+  IF p_idempotency_key IS NOT NULL AND TRIM(p_idempotency_key) != '' THEN
+    INSERT INTO public.idempotencia_chaves (chave, usuario_id, escopo, parametros_hash, resultado_json)
+    VALUES (p_idempotency_key, v_user_id, 'cadastrar_produto', v_params_hash, v_resultado)
+    ON CONFLICT (chave) DO NOTHING;
+  END IF;
+
+  RETURN v_resultado;
+END;
+$$;
+
+REVOKE EXECUTE ON FUNCTION public.cadastrar_produto_com_estoques_rpc(text, text, text, integer, text) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.cadastrar_produto_com_estoques_rpc(text, text, text, integer, text) TO authenticated;
+
+REVOKE EXECUTE ON FUNCTION public.criar_pedido_compra_rpc(bigint, bigint, integer, text) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.criar_pedido_compra_rpc(bigint, bigint, integer, text) TO authenticated;
+
+REVOKE EXECUTE ON FUNCTION public.ajustar_estoque_rpc(bigint, bigint, text, integer, text, text) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.ajustar_estoque_rpc(bigint, bigint, text, integer, text, text) TO authenticated;
 
 REVOKE EXECUTE ON FUNCTION public.concluir_transferencia_rpc(bigint, text) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.concluir_transferencia_rpc(bigint, text) TO authenticated;

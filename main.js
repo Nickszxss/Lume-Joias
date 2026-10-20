@@ -604,14 +604,29 @@ const api = {
         throw new Error(`Estoque insuficiente na filial de origem (disponível: ${estoqueDisponivel}, solicitado: ${dados.quantidade}).`);
       }
 
+      const { data: authData, error: authErr } = await client.auth.getUser();
+      if (authErr || !authData || !authData.user || !authData.user.email) {
+        throw new Error('Sessão inválida ou expirada. Faça login novamente para solicitar a transferência.');
+      }
+
+      const { data: usuarioDb, error: usuarioErr } = await client
+        .from('usuarios')
+        .select('id, nome')
+        .eq('email', authData.user.email)
+        .eq('ativo', true)
+        .single();
+
+      if (usuarioErr || !usuarioDb || !usuarioDb.id) {
+        throw new Error('Usuário autenticado não encontrado ou inativo no sistema.');
+      }
+
       const payload = {
         produto_id: dados.produtoId,
         origem_id: dados.origemId,
         destino_id: dados.destinoId,
         quantidade: dados.quantidade,
-        usuario_id: usuario ? usuario.id : null,
-        status: 'solicitada',
-        created_at: new Date().toISOString()
+        usuario_id: usuarioDb.id,
+        status: 'solicitada'
       };
       const { data, error } = await client.from('transferencias').insert([payload]).select().single();
       if (!error && data) {
@@ -622,7 +637,7 @@ const api = {
           origem_id: data.origem_id,
           destino_id: data.destino_id,
           quantidade: data.quantidade,
-          solicitante: usuario ? usuario.nome : 'Solicitante',
+          solicitante: usuarioDb.nome || (usuario ? usuario.nome : 'Solicitante'),
           data: new Date().toLocaleDateString('pt-BR'),
           status: 'solicitada'
         };

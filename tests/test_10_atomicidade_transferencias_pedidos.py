@@ -80,8 +80,7 @@ def test_11_tentativas_concorrentes_receber_pedido():
     # SELECT FOR UPDATE no pedido
     assert "FROM public.pedidos_compra\n  WHERE id = p_pedido_id\n  FOR UPDATE" in sql or "WHERE id = p_pedido_id\n  FOR UPDATE" in sql
     # Advisory locks e SELECT FOR UPDATE no estoque
-    assert ("pg_advisory_xact_lock(pg_catalog.hashtext(v_pedido.filial_id::text || '_' || v_item.produto_id::text))" in sql or
-            "pg_advisory_xact_lock(pg_catalog.hashtextextended(v_pedido.filial_id::text || ':' || v_item.produto_id::text, 0))" in sql)
+    assert "pg_advisory_xact_lock(pg_catalog.hashtext(v_pedido.filial_id::text || '_' || v_item.produto_id::text))" in sql
     assert "FOR UPDATE" in sql
 
 def test_12_consistencia_final_estoque_movimentacoes_status():

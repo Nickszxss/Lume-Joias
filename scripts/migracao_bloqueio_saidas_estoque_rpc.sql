@@ -1,7 +1,7 @@
 -- =====================================================================
--- SCRIPT DE MIGRAÇÃO DEDICADO — LUME JOIAS (v2.4 OFICIAL E AJUSTADO)
+-- SCRIPT DE MIGRAÇÃO DEDICADO — LUME JOIAS (v2.5 OFICIAL E HARMONIZADO)
 -- Objeto: Proteção Estrita contra Saídas Acima do Saldo Disponível em Estoque,
---         Harmonização de Locks de Concorrência, Suporte a Idempotência e Fechamento Rigoroso de Permissões Direct Update.
+--         Prevenção de Integer Overflow, Suporte Completo a Idempotência e Fechamento Rigoroso de Permissões Direct Update.
 -- Arquitetura: Supabase PostgreSQL (Ajuste Manual de Estoque)
 -- =====================================================================
 
@@ -27,7 +27,7 @@ END $$;
 REVOKE UPDATE ON public.estoques FROM PUBLIC, anon, authenticated;
 REVOKE UPDATE (id, filial_id, produto_id, quantidade, status, updated_at) ON public.estoques FROM PUBLIC, anon, authenticated;
 
--- 3. RPC Transacional Atômico para Ajuste de Estoque com Suporte Completo a Idempotência e Locks Harmonizados
+-- 3. RPC Transacional Atômico para Ajuste de Estoque com Proteção contra Overflow e Suporte a Idempotência
 CREATE OR REPLACE FUNCTION public.ajustar_estoque_rpc(
   p_produto_id bigint,
   p_filial_id bigint,
@@ -51,9 +51,8 @@ DECLARE
   v_prod_ativo boolean;
   v_qtd_minima integer;
   v_qtd_ant integer;
-  v_qtd_nova integer;
+  v_qtd_nova bigint;
   v_status text;
-  v_lock_key bigint;
   v_params_hash text;
   v_idempotent_rec record;
   v_resultado json;
@@ -148,8 +147,6 @@ BEGIN
   END IF;
 
   -- 5. Trava Determinística e Padronizada de Concorrência
-  -- Utiliza a convenção exata da base de dados: hashtextextended(filial_id::text || ':' || produto_id::text, 0)
-  -- Garante sincronização perfeita e serialização entre ajustes manuais, conclusões de transferência e recebimentos de pedidos.
   PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(p_filial_id::text || ':' || p_produto_id::text, 0));
 
   SELECT quantidade INTO v_qtd_ant
@@ -161,14 +158,17 @@ BEGIN
     v_qtd_ant := 0;
   END IF;
 
-  -- 6. Validação do Saldo para Operações de Saída
+  -- 6. Validação do Saldo e Proteção contra Integer Overflow
   IF p_tipo = 'saida' THEN
     IF v_qtd_ant < p_quantidade THEN
       RAISE EXCEPTION 'Saldo insuficiente na filial para realizar a saida (disponivel: %, solicitado: %).', v_qtd_ant, p_quantidade;
     END IF;
     v_qtd_nova := v_qtd_ant - p_quantidade;
   ELSE
-    v_qtd_nova := v_qtd_ant + p_quantidade;
+    v_qtd_nova := v_qtd_ant::bigint + p_quantidade::bigint;
+    IF v_qtd_nova > 2147483647 THEN
+      RAISE EXCEPTION 'Operacao negada: O ajuste de estoque excede a capacidade maxima permitida pelo sistema (2.147.483.647 unidades).';
+    END IF;
   END IF;
 
   -- Calcular status do estoque com base na quantidade mínima
@@ -180,7 +180,7 @@ BEGIN
 
   -- 7. Atualização Atômica do Saldo
   INSERT INTO public.estoques (filial_id, produto_id, quantidade, status, updated_at)
-  VALUES (p_filial_id, p_produto_id, v_qtd_nova, v_status::public.status_estoque, now())
+  VALUES (p_filial_id, p_produto_id, v_qtd_nova::integer, v_status::public.status_estoque, now())
   ON CONFLICT (filial_id, produto_id) DO UPDATE
   SET quantidade = EXCLUDED.quantidade,
       status = EXCLUDED.status,
@@ -188,13 +188,13 @@ BEGIN
 
   -- 8. Registro de Movimentação Auditável na Mesma Transação
   INSERT INTO public.movimentacoes (produto_id, filial_id, usuario_id, tipo, quantidade, quantidade_anterior, quantidade_nova, motivo, created_at)
-  VALUES (p_produto_id, p_filial_id, v_user_id, p_tipo, p_quantidade, v_qtd_ant, v_qtd_nova, COALESCE(p_motivo, 'Ajuste manual de estoque'), now());
+  VALUES (p_produto_id, p_filial_id, v_user_id, p_tipo, p_quantidade, v_qtd_ant, v_qtd_nova::integer, COALESCE(p_motivo, 'Ajuste manual de estoque'), now());
 
   v_resultado := json_build_object(
     'success', true,
     'message', 'Estoque ajustado com sucesso.',
     'quantidade_anterior', v_qtd_ant,
-    'quantidade_nova', v_qtd_nova
+    'quantidade_nova', v_qtd_nova::integer
   );
 
   -- 9. Persistência da Chave de Idempotência

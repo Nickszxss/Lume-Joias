@@ -1,13 +1,13 @@
 -- =====================================================================
 -- SCRIPT DE MIGRAÇÃO DEDICADO — RECEBIMENTO DE PEDIDOS DE COMPRA (RPC)
--- Projeto: Lume-Joias (v2.1 REVISADO E HARMONIZADO)
--- Objetivo: Garantir o recebimento atômico de pedidos de compra com idempotência
---         e locks de concorrência harmonizados com o ajuste de estoque e transferências.
+-- Projeto: Lume-Joias (v2.2 REVISADO E HARMONIZADO)
+-- Objetivo: Garantir o recebimento atômico de pedidos de compra com idempotência,
+--         prevenção de integer overflow, validação de produtos ativos e locks harmonizados.
 -- =====================================================================
 
 BEGIN;
 
--- Drop de assinaturas anteriores para garantir atualização limpa
+-- Drop de assinaturas anteriores para garantir atualização limpa sem ambiguidades de sobrecarga
 DROP FUNCTION IF EXISTS public.receber_pedido_rpc(bigint, text);
 DROP FUNCTION IF EXISTS public.receber_pedido_rpc(bigint, text, text);
 
@@ -30,9 +30,10 @@ DECLARE
   v_user_cargo text;
   v_user_filial_id bigint;
   v_items_count integer;
+  v_prod_ativo boolean;
   v_prod_qtd_minima integer;
   v_dest_qtd_ant integer;
-  v_dest_qtd_nova integer;
+  v_dest_qtd_nova bigint;
   v_dest_status text;
   v_params_hash text;
   v_idempotent_rec record;
@@ -127,7 +128,7 @@ BEGIN
     RAISE EXCEPTION 'Operacao negada: Pedido de compra ID % nao possui itens vinculados.', p_pedido_id;
   END IF;
 
-  -- 5. Processar cada item do pedido com Advisory Lock harmonizado por (filial_id, produto_id)
+  -- 5. Processar cada item do pedido em ordem determinística de produto_id para prevenir deadlocks
   FOR v_item IN
     SELECT * FROM public.itens_pedido_compra WHERE pedido_id = p_pedido_id ORDER BY produto_id ASC
   LOOP
@@ -135,7 +136,14 @@ BEGIN
       RAISE EXCEPTION 'Operacao negada: Item ID % possui quantidade invalida (%).', v_item.id, v_item.quantidade;
     END IF;
 
-    SELECT qtd_minima INTO v_prod_qtd_minima FROM public.produtos WHERE id = v_item.produto_id LIMIT 1;
+    -- Validar existência e estado ativo do produto
+    SELECT ativo, qtd_minima INTO v_prod_ativo, v_prod_qtd_minima FROM public.produtos WHERE id = v_item.produto_id LIMIT 1;
+    IF v_prod_ativo IS NULL THEN
+      RAISE EXCEPTION 'Operacao negada: Produto ID % do pedido nao foi encontrado.', v_item.produto_id;
+    END IF;
+    IF v_prod_ativo = false THEN
+      RAISE EXCEPTION 'Operacao negada: Produto ID % esta inativo e o pedido nao pode ser recebido.', v_item.produto_id;
+    END IF;
 
     -- Advisory Lock transacional harmonizado por par filial/produto
     PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(v_pedido.filial_id::text || ':' || v_item.produto_id::text, 0));
@@ -146,7 +154,12 @@ BEGIN
       0
     ) INTO v_dest_qtd_ant;
 
-    v_dest_qtd_nova := v_dest_qtd_ant + v_item.quantidade;
+    -- Calcular novo saldo e verificar integer overflow
+    v_dest_qtd_nova := v_dest_qtd_ant::bigint + v_item.quantidade::bigint;
+    IF v_dest_qtd_nova > 2147483647 THEN
+      RAISE EXCEPTION 'Operacao negada: O recebimento do pedido excede a capacidade maxima de estoque permitida (2.147.483.647 unidades).';
+    END IF;
+
     v_dest_status := CASE
       WHEN v_dest_qtd_nova = 0 THEN 'zerado'
       WHEN v_dest_qtd_nova <= COALESCE(v_prod_qtd_minima, 0) THEN 'baixo'
@@ -155,7 +168,7 @@ BEGIN
 
     -- Incrementar estoque com status padronizado
     INSERT INTO public.estoques (filial_id, produto_id, quantidade, status, updated_at)
-    VALUES (v_pedido.filial_id, v_item.produto_id, v_dest_qtd_nova, v_dest_status::public.status_estoque, now())
+    VALUES (v_pedido.filial_id, v_item.produto_id, v_dest_qtd_nova::integer, v_dest_status::public.status_estoque, now())
     ON CONFLICT (filial_id, produto_id) DO UPDATE
     SET quantidade = EXCLUDED.quantidade,
         status = EXCLUDED.status,
@@ -163,7 +176,7 @@ BEGIN
 
     -- Registrar movimentação auditável na mesma transação
     INSERT INTO public.movimentacoes (produto_id, filial_id, usuario_id, tipo, quantidade, quantidade_anterior, quantidade_nova, motivo, created_at)
-    VALUES (v_item.produto_id, v_pedido.filial_id, v_user_id, 'entrada', v_item.quantidade, v_dest_qtd_ant, v_dest_qtd_nova, COALESCE(p_observacao, 'Recebimento de Pedido de Compra'), now());
+    VALUES (v_item.produto_id, v_pedido.filial_id, v_user_id, 'entrada', v_item.quantidade, v_dest_qtd_ant, v_dest_qtd_nova::integer, COALESCE(p_observacao, 'Recebimento de Pedido de Compra'), now());
   END LOOP;
 
   -- 6. Marcar pedido como recebido

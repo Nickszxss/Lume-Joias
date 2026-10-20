@@ -199,6 +199,7 @@ BEGIN
 END;
 $$;
 
+REVOKE EXECUTE ON FUNCTION public.receber_pedido_rpc(bigint, text) FROM PUBLIC, anon;
 REVOKE EXECUTE ON FUNCTION public.receber_pedido_rpc(bigint, text, text) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.receber_pedido_rpc(bigint, text, text) TO authenticated;
 

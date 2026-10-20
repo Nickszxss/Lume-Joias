@@ -123,9 +123,9 @@ function resolverMockLocal(path, options) {
   if (path === '/filiais' && method === 'GET') return mockFiliais;
   if (path === '/produtos' && method === 'GET') return mockProdutos;
   if (path === '/produtos' && method === 'POST') {
-    const novoP = { id: mockProdutos.length + 1, sku: body.sku, nome: body.nome, categoria: body.categoria || 'Geral', qtd_minima: body.qtd_minima || 0 };
+    const novoP = { id: mockProdutos.length + 1, sku: body.sku, nome: body.nome, categoria: body.categoria || 'Geral' };
     mockProdutos.push(novoP);
-    mockFiliais.forEach(f => mockEstoques.push({ produto_id: novoP.id, filial_id: f.id, quantidade: body.qtd_inicial || 0, status: statusEstoque(body.qtd_inicial || 0, body.qtd_minima || 0) }));
+    mockFiliais.forEach(f => mockEstoques.push({ produto_id: novoP.id, filial_id: f.id, quantidade: body.qtd_inicial || 0, status: statusEstoque(body.qtd_inicial || 0) }));
     return novoP;
   }
 
@@ -143,8 +143,7 @@ function resolverMockLocal(path, options) {
     }
     const ant = est.quantidade;
     est.quantidade = body.tipo === 'entrada' ? est.quantidade + body.quantidade : Math.max(0, est.quantidade - body.quantidade);
-    const prd = mockProdutos.find(p => p.id == body.produtoId);
-    est.status = statusEstoque(est.quantidade, prd ? prd.qtd_minima : 0);
+    est.status = statusEstoque(est.quantidade);
 
     mockMovimentacoes.unshift({
       data: new Date().toLocaleString('pt-BR'),
@@ -212,8 +211,7 @@ function resolverMockLocal(path, options) {
       }
       const ant = est.quantidade;
       est.quantidade += p.quantidade;
-      const prd = mockProdutos.find(prdItem => prdItem.id == p.produto_id);
-      est.status = statusEstoque(est.quantidade, prd ? prd.qtd_minima : 0);
+      est.status = statusEstoque(est.quantidade);
 
       mockMovimentacoes.unshift({
         data: new Date().toLocaleString('pt-BR'),
@@ -235,7 +233,7 @@ function resolverMockLocal(path, options) {
     const alertas = mockEstoques.filter(e => e.status === 'baixo' || e.status === 'zerado').map(e => {
       const p = mockProdutos.find(prd => prd.id === e.produto_id) || {};
       const f = mockFiliais.find(fil => fil.id === e.filial_id) || {};
-      return { ...e, sku: p.sku, produtoNome: p.nome, filialNome: f.nome, quantidadeMinima: p.qtd_minima };
+      return { ...e, sku: p.sku, produtoNome: p.nome, filialNome: f.nome };
     });
     return {
       totalBaixo: alertas.filter(a => a.status === 'baixo').length,
@@ -268,8 +266,7 @@ function resolverMockLocal(path, options) {
       alertas: mockEstoques.filter(e => e.status === 'baixo' || e.status === 'zerado').map(e => ({
         ...e,
         produtoNome: mockProdutos.find(p => p.id === e.produto_id)?.nome,
-        filialNome: mockFiliais.find(f => f.id === e.filial_id)?.nome,
-        quantidadeMinima: mockProdutos.find(p => p.id === e.produto_id)?.qtd_minima
+        filialNome: mockFiliais.find(f => f.id === e.filial_id)?.nome
       }))
     };
   }
@@ -280,6 +277,20 @@ function resolverMockLocal(path, options) {
 // Helper para obter o cliente Supabase ativo
 function getSupabaseClient() {
   return window.supabaseClient || (typeof window.initSupabase === 'function' ? window.initSupabase() : null);
+}
+
+function obterCategoriaPorNome(nome) {
+  if (!nome || typeof nome !== 'string') {
+    throw new Error('Nome do produto é obrigatório.');
+  }
+  const nomeLower = nome.trim().toLowerCase();
+  if (nomeLower.includes('anel')) return 'ANEL';
+  if (nomeLower.includes('pulseira')) return 'PULSEIRA';
+  if (nomeLower.includes('solitária') || nomeLower.includes('solitaria')) return 'SOLITARIA';
+  if (nomeLower.includes('colar')) return 'COLAR';
+  if (nomeLower.includes('brinco')) return 'BRINCO';
+
+  throw new Error('Nome do produto deve corresponder a uma categoria permitida (Anel, Pulseira, Solitária, Colar, Brinco).');
 }
 
 // Operações da API com cliente Supabase direto (com fallback gracioso para mock estático)
@@ -300,14 +311,19 @@ const api = {
     if (client) {
       const { data, error } = await client.from('produtos').select('*').order('id', { ascending: true });
       if (!error && data) {
-        return data.map(p => ({
-          id: p.id,
-          sku: p.sku || p.codigo || obterSkuPorNome(p.nome),
-          nome: p.nome,
-          categoria: p.categoria || p.descricao || 'Geral',
-          qtd_minima: p.qtd_minima ?? 0,
-          ativo: p.ativo !== false
-        }));
+        return data.map(p => {
+          let cat = p.categoria || p.descricao || 'Geral';
+          try {
+            cat = obterCategoriaPorNome(p.nome);
+          } catch (_) {}
+          return {
+            id: p.id,
+            sku: p.sku || p.codigo || obterSkuPorNome(p.nome),
+            nome: p.nome,
+            categoria: cat,
+            ativo: p.ativo !== false
+          };
+        });
       }
     }
     return apiRequest('/produtos');
@@ -319,9 +335,6 @@ const api = {
     }
     if (!dados.nome || !dados.sku) {
       throw new Error('Nome e SKU do produto são obrigatórios.');
-    }
-    if (!Number.isInteger(dados.qtd_minima) || dados.qtd_minima < 0) {
-      throw new Error('A quantidade mínima deve ser um número inteiro maior ou igual a zero.');
     }
 
     const client = getSupabaseClient();
@@ -343,8 +356,7 @@ const api = {
       const payload = {
         nome: dados.nome,
         codigo: dados.sku,
-        descricao: dados.categoria || 'Geral',
-        qtd_minima: dados.qtd_minima
+        descricao: dados.categoria || 'Geral'
       };
 
       const { data, error } = await client
@@ -408,12 +420,11 @@ const api = {
     return apiRequest('/produtos/inativos-locais');
   },
 
+  cadastrarProduto: async (dados) => api.criarProduto(dados),
+
   criarProduto: async (dados) => {
     if (!dados.nome || !dados.sku) {
       throw new Error('Preencha Nome e SKU do produto.');
-    }
-    if (!Number.isInteger(dados.qtd_minima) || dados.qtd_minima < 0) {
-      throw new Error('A quantidade mínima deve ser um inteiro válido maior ou igual a zero.');
     }
 
     const client = getSupabaseClient();
@@ -424,7 +435,6 @@ const api = {
         p_nome: dados.nome.trim(),
         p_sku: dados.sku.trim(),
         p_categoria: dados.categoria || 'Geral',
-        p_qtd_minima: dados.qtd_minima ?? 10,
         p_idempotency_key: idempotencyKey
       });
 
@@ -443,8 +453,7 @@ const api = {
         id: prodId,
         sku: data.sku,
         nome: data.nome,
-        categoria: dados.categoria || 'Geral',
-        qtd_minima: dados.qtd_minima ?? 10
+        categoria: dados.categoria || 'Geral'
       };
     }
     return apiRequest('/produtos', { method: 'POST', body: JSON.stringify(dados) });
@@ -735,8 +744,7 @@ const api = {
             ...e,
             sku: p.sku || p.codigo || `JOIA-00${p.id}`,
             produtoNome: p.nome,
-            filialNome: f.nome,
-            quantidadeMinima: p.qtd_minima || 0
+            filialNome: f.nome
           };
         });
         return {
@@ -833,8 +841,7 @@ const api = {
         const alertas = filteredE.filter(e => e.status === 'baixo' || e.status === 'zerado').map(e => ({
           ...e,
           produtoNome: listP.find(p => String(p.id) === String(e.produto_id))?.nome || `Produto #${e.produto_id}`,
-          filialNome: listF.find(f => String(f.id) === String(e.filial_id))?.nome || `Filial #${e.filial_id}`,
-          quantidadeMinima: listP.find(p => String(p.id) === String(e.produto_id))?.qtd_minima || 0
+          filialNome: listF.find(f => String(f.id) === String(e.filial_id))?.nome || `Filial #${e.filial_id}`
         }));
 
         const filteredT = (usuario && usuario.tipo === 'funcionario' && usuario.filial_id)
@@ -1067,13 +1074,18 @@ const $ = id => document.getElementById(id);
 const nomeFilial = id => FILIAIS.find(f=>f.id===id)?.nome || '—';
 const nomeProduto = id => produtos.find(p=>p.id===id)?.nome || '—';
 const skuProduto = id => produtos.find(p=>p.id===id)?.sku || '—';
-const minProduto = id => produtos.find(p=>p.id===id)?.qtd_minima || 0;
-
 function statusEstoque(qtd){
-  if(qtd === 0 || qtd <= 0) return 'zerado';
-  return 'suficiente';
+  if(qtd <= 0) return 'zerado';
+  if(qtd < 20) return 'baixo';
+  if(qtd <= 50) return 'suficiente';
+  return 'suficiente+';
 }
-const STATUS_LABEL = {suficiente:'Disponível', zerado:'Zerado'};
+const STATUS_LABEL = {
+  suficiente: 'Disponível',
+  'suficiente+': 'Disponível+',
+  baixo: 'Baixo',
+  zerado: 'Zerado'
+};
 
 function toast(msg, erro=false){
   const t = $('toast');
@@ -1448,15 +1460,14 @@ function pintarAlertasDashboard(alertas){
     dashA.innerHTML = alertas.length === 0
       ? '<p class="empty-state">Nenhum alerta no momento.</p>'
       : `<table>
-          <thead><tr><th>Produto</th><th>Filial</th><th>Qtd. Atual</th><th>Qtd. Mínima</th><th>Status</th></tr></thead>
+          <thead><tr><th>Produto</th><th>Filial</th><th>Qtd. Atual</th><th>Status</th></tr></thead>
           <tbody>
             ${alertas.map(e => `
               <tr>
                 <td><b>${escapeHtml(e.produtoNome ?? nomeProduto(e.produto_id))}</b></td>
                 <td>${escapeHtml(e.filialNome ?? nomeFilial(e.filial_id))}</td>
                 <td>${e.quantidade}</td>
-                <td>${e.quantidadeMinima ?? minProduto(e.produto_id)}</td>
-                <td><span class="badge ${e.quantidade===0?'danger':'warn'}">${STATUS_LABEL[e.status ?? statusEstoque(e.quantidade, e.quantidadeMinima ?? minProduto(e.produto_id))]}</span></td>
+                <td><span class="badge ${e.quantidade===0?'danger':(e.quantidade<20?'warn':'ok')}">${STATUS_LABEL[e.status ?? statusEstoque(e.quantidade)]}</span></td>
               </tr>
             `).join('')}
           </tbody>
@@ -1577,7 +1588,7 @@ async function salvarEdicaoProduto() {
   if (saveBtn) saveBtn.disabled = true;
 
   try {
-    await api.editarProduto(id, { nome, sku, categoria, qtd_minima: 0 });
+    await api.editarProduto(id, { nome, sku, categoria });
     fecharModal();
     toast('Produto atualizado com sucesso!');
     renderProdutos();
@@ -1645,20 +1656,6 @@ const MAPA_CATEGORIAS_OFICIAIS = {
   'brinco de prata': 'BRINCO'
 };
 
-function obterCategoriaPorNome(nome) {
-  if (!nome || typeof nome !== 'string') {
-    throw new Error('Nome do produto é obrigatório.');
-  }
-  const nomeLower = nome.trim().toLowerCase();
-  if (nomeLower.includes('anel')) return 'ANEL';
-  if (nomeLower.includes('pulseira')) return 'PULSEIRA';
-  if (nomeLower.includes('solitária') || nomeLower.includes('solitaria')) return 'SOLITARIA';
-  if (nomeLower.includes('colar')) return 'COLAR';
-  if (nomeLower.includes('brinco')) return 'BRINCO';
-
-  throw new Error('Nome do produto deve corresponder a uma categoria permitida (Anel, Pulseira, Solitária, Colar, Brinco).');
-}
-
 function obterSkuPorNome(nome) {
   if (!nome) return '01';
   const nomeLower = nome.trim().toLowerCase();
@@ -1715,11 +1712,8 @@ async function salvarProduto(){
 
   const nome = $('p-nome') ? $('p-nome').value.trim() : '';
   const sku = $('p-sku') ? $('p-sku').value.trim() : '';
-  const minRaw = $('p-min') ? $('p-min').value : '10';
-  const qtd_minima = parseInt(minRaw);
 
   if(!nome || !sku){ toast('Preencha Nome e SKU.', true); return; }
-  if(!Number.isInteger(qtd_minima) || qtd_minima < 0){ toast('Estoque mínimo deve ser um número inteiro válido.', true); return; }
 
   if (saveBtn) saveBtn.disabled = true;
 
@@ -1732,7 +1726,6 @@ async function salvarProduto(){
       nome,
       sku,
       categoria,
-      qtd_minima,
       idempotencyKey: produtoIdempotencyKey
     });
     produtoIdempotencyKey = null;
@@ -2214,7 +2207,6 @@ async function renderAlertas(){
             <td><b>${escapeHtml(e.produtoNome ?? nomeProduto(e.produto_id))}</b></td>
             <td>${escapeHtml(e.filialNome ?? nomeFilial(e.filial_id))}</td>
             <td>${e.quantidade}</td>
-            <td>${e.quantidadeMinima ?? minProduto(e.produto_id)}</td>
             <td><span class="badge ${e.status==='zerado'?'danger':'warn'}">${STATUS_LABEL[e.status]}</span></td>
             <td><button class="btn-sm btn-primary" onclick="abrirModalAjuste(${e.produto_id}, ${e.filial_id})">Repor</button></td>
           </tr>`).join('');

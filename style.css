@@ -997,3 +997,51 @@ tr:hover td {
     width:100%;
   }
 }
+
+/* CADASTRO MULTIPLAS FILIAIS E QUANTIDADE */
+.field-help {
+  margin-top: 6px;
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.filiais-checkbox-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.filial-checkbox-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background-color: var(--input-bg);
+  cursor: pointer;
+  user-select: none;
+  transition: all 0.2s ease;
+  font-size: 0.875rem;
+  color: var(--text-primary);
+}
+
+.filial-checkbox-item:hover {
+  border-color: var(--rose-primary);
+  background-color: var(--rose-light, #fdf2f8);
+}
+
+.filial-checkbox-item.selected {
+  border-color: var(--rose-primary);
+  background-color: var(--rose-light, #fdf2f8);
+  font-weight: 600;
+}
+
+.filial-checkbox-item input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  accent-color: var(--rose-primary);
+}

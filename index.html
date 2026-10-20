@@ -422,8 +422,14 @@
     </div>
 
     <div class="field">
-      <label>Filial *</label>
-      <select id="p-filial"></select>
+      <label for="p-qtd">Quantidade *</label>
+      <input type="number" id="p-qtd" min="0" max="50" step="1" value="0" placeholder="0 a 50">
+      <p class="field-help">A quantidade informada será aplicada a cada filial selecionada.</p>
+    </div>
+
+    <div class="field">
+      <label>Filiais *</label>
+      <div id="p-filiais-container" class="filiais-checkbox-group"></div>
     </div>
 
 

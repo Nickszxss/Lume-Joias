@@ -427,6 +427,16 @@ const api = {
       throw new Error('Preencha Nome e SKU do produto.');
     }
 
+    const qtd = dados.quantidade !== undefined ? dados.quantidade : 0;
+    if (typeof qtd !== 'number' || !Number.isInteger(qtd) || qtd < 0 || qtd > 50) {
+      throw new Error('A quantidade deve ser um número inteiro entre 0 e 50.');
+    }
+
+    const filiaisIds = Array.isArray(dados.filiaisIds) ? dados.filiaisIds.map(id => parseInt(id, 10)) : [1, 2, 3, 4, 5];
+    if (filiaisIds.length === 0) {
+      throw new Error('Selecione pelo menos uma filial.');
+    }
+
     const client = getSupabaseClient();
     if (client) {
       const idempotencyKey = dados.idempotencyKey || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `produto-${Date.now()}-${Math.random()}`);
@@ -435,7 +445,9 @@ const api = {
         p_nome: dados.nome.trim(),
         p_sku: dados.sku.trim(),
         p_categoria: dados.categoria || 'Geral',
-        p_idempotency_key: idempotencyKey
+        p_idempotency_key: idempotencyKey,
+        p_quantidade: qtd,
+        p_filiais_ids: filiaisIds
       });
 
       if (error) {
@@ -1684,16 +1696,31 @@ function atualizarSkuPorTipo() {
 
 function renderProdutosFiltro(){ pintarProdutos(); }
 
-function abrirModalProduto(){
-  const pf = $('p-filial');
-  if (pf) {
-    pf.innerHTML = FILIAIS.map(f => `<option value="${f.id}">${escapeHtml(f.nome)}</option>`).join('');
-    if (usuario && usuario.tipo === 'funcionario' && usuario.filial_id) {
-      pf.value = usuario.filial_id;
-      pf.disabled = true;
+function toggleFilialCheckboxClass(cb) {
+  if (cb && cb.parentElement) {
+    if (cb.checked) {
+      cb.parentElement.classList.add('selected');
     } else {
-      pf.disabled = false;
+      cb.parentElement.classList.remove('selected');
     }
+  }
+}
+window.toggleFilialCheckboxClass = toggleFilialCheckboxClass;
+
+function abrirModalProduto(){
+  const container = $('p-filiais-container');
+  if (container) {
+    container.innerHTML = FILIAIS.map(f => `
+      <label class="filial-checkbox-item selected">
+        <input type="checkbox" class="p-filial-cb" value="${f.id}" checked onchange="toggleFilialCheckboxClass(this)">
+        <span>${escapeHtml(f.nome)}</span>
+      </label>
+    `).join('');
+  }
+
+  const inputQtd = $('p-qtd');
+  if (inputQtd) {
+    inputQtd.value = '0';
   }
 
   produtoIdempotencyKey = (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `produto-${Date.now()}-${Math.random()}`);
@@ -1715,6 +1742,26 @@ async function salvarProduto(){
 
   if(!nome || !sku){ toast('Preencha Nome e SKU.', true); return; }
 
+  const qtdInput = $('p-qtd');
+  const qtdRaw = qtdInput ? qtdInput.value.trim() : '';
+
+  if (qtdRaw === '' || isNaN(qtdRaw) || qtdRaw.includes('.') || qtdRaw.includes(',')) {
+    toast('A quantidade deve ser um número inteiro entre 0 e 50.', true);
+    return;
+  }
+
+  const qtd = Number(qtdRaw);
+  if (!Number.isInteger(qtd) || qtd < 0 || qtd > 50) {
+    toast('A quantidade deve ser um número inteiro entre 0 e 50.', true);
+    return;
+  }
+
+  const checkedFiliais = Array.from(document.querySelectorAll('.p-filial-cb:checked')).map(cb => parseInt(cb.value, 10));
+  if (checkedFiliais.length === 0) {
+    toast('Selecione pelo menos uma filial.', true);
+    return;
+  }
+
   if (saveBtn) saveBtn.disabled = true;
 
   try {
@@ -1726,12 +1773,15 @@ async function salvarProduto(){
       nome,
       sku,
       categoria,
+      quantidade: qtd,
+      filiaisIds: checkedFiliais,
       idempotencyKey: produtoIdempotencyKey
     });
     produtoIdempotencyKey = null;
     fecharModal();
     toast('Produto adicionado com sucesso!');
-    renderProdutos();
+    await renderProdutos();
+    await renderEstoque();
   } catch (err) {
     toast(err.message || 'Não foi possível salvar o produto.', true);
   } finally {

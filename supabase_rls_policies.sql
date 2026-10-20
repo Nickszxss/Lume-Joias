@@ -80,6 +80,39 @@ BEGIN
     END IF;
 END $$;
 
+-- Regra central de status: não depende mais de produtos.qtd_minima.
+-- Requer executar antes, em uma consulta separada,
+-- scripts/migracao_status_estoque_suficiente_plus.sql.
+CREATE OR REPLACE FUNCTION public.atualizar_status_estoque()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = ''
+AS $$
+BEGIN
+  IF NEW.quantidade IS NULL OR NEW.quantidade < 0 THEN
+    RAISE EXCEPTION 'Quantidade de estoque deve ser maior ou igual a zero.';
+  END IF;
+
+  NEW.status := CASE
+    WHEN NEW.quantidade = 0 THEN 'zerado'::public.status_estoque
+    WHEN NEW.quantidade < 20 THEN 'baixo'::public.status_estoque
+    WHEN NEW.quantidade <= 50 THEN 'suficiente'::public.status_estoque
+    ELSE 'suficiente+'::public.status_estoque
+  END;
+  NEW.updated_at := pg_catalog.now();
+  RETURN NEW;
+END;
+$$;
+
+-- Recalcular apenas o campo status existente, sem alterar saldos ou updated_at.
+UPDATE public.estoques
+SET status = CASE
+  WHEN quantidade = 0 THEN 'zerado'::public.status_estoque
+  WHEN quantidade < 20 THEN 'baixo'::public.status_estoque
+  WHEN quantidade <= 50 THEN 'suficiente'::public.status_estoque
+  ELSE 'suficiente+'::public.status_estoque
+END;
+
 -- 2. Funções auxiliares para extrair perfil e filial do usuário autenticado no Supabase Auth via auth.uid()
 -- Endurecidas com SECURITY DEFINER, search_path totalmente limpo (SET search_path = '') e checagem estrita de unicidade por auth_user_id.
 -- A fonte oficial de autorização utiliza o enum u.tipo::text ('gerente', 'funcionario').
@@ -364,7 +397,6 @@ DECLARE
   v_user_filial_id bigint;
   v_filial_ativa boolean;
   v_prod_ativo boolean;
-  v_qtd_minima integer;
   v_qtd_ant integer;
   v_qtd_nova integer;
   v_status text;
@@ -454,7 +486,7 @@ BEGIN
     RAISE EXCEPTION 'Operacao negada: Filial ID % esta inativa.', p_filial_id;
   END IF;
 
-  SELECT ativo, qtd_minima INTO v_prod_ativo, v_qtd_minima FROM public.produtos WHERE id = p_produto_id LIMIT 1;
+  SELECT ativo INTO v_prod_ativo FROM public.produtos WHERE id = p_produto_id LIMIT 1;
   IF v_prod_ativo IS NULL THEN
     RAISE EXCEPTION 'Operacao negada: Produto ID % nao encontrado.', p_produto_id;
   END IF;
@@ -463,7 +495,7 @@ BEGIN
   END IF;
 
   -- 4. Proteção contra Concorrência em Registros Inexistentes
-  v_lock_key := pg_catalog.hashtext(p_filial_id::text || '_' || p_produto_id::text);
+  v_lock_key := pg_catalog.hashtextextended(p_filial_id::text || ':' || p_produto_id::text, 0);
   PERFORM pg_catalog.pg_advisory_xact_lock(v_lock_key);
 
   -- 5. Obter e bloquear linha existente do estoque
@@ -482,14 +514,18 @@ BEGIN
     END IF;
     v_qtd_nova := v_qtd_ant - p_quantidade;
   ELSE
+    IF p_quantidade > 2147483647 - v_qtd_ant THEN
+      RAISE EXCEPTION 'Operacao negada: O incremento ultrapassaria o limite maximo de INTEGER (2147483647).';
+    END IF;
     v_qtd_nova := v_qtd_ant + p_quantidade;
   END IF;
 
-  -- Calcular status do estoque com base nas 3 regras: zerado, baixo e suficiente
+  -- Status fixo por faixa; independente do campo legado qtd_minima.
   v_status := CASE
     WHEN v_qtd_nova = 0 THEN 'zerado'
-    WHEN v_qtd_nova <= COALESCE(v_qtd_minima, 0) THEN 'baixo'
-    ELSE 'suficiente'
+    WHEN v_qtd_nova < 20 THEN 'baixo'
+    WHEN v_qtd_nova <= 50 THEN 'suficiente'
+    ELSE 'suficiente+'
   END;
 
   -- 6. Atualizar ou inserir estoque de forma atômica
@@ -577,7 +613,6 @@ DECLARE
   v_user_id bigint;
   v_user_cargo text;
   v_user_filial_id bigint;
-  v_prod_qtd_minima integer;
   v_origem_qtd_ant integer;
   v_origem_qtd_nova integer;
   v_origem_status text;
@@ -675,16 +710,13 @@ BEGIN
     RAISE EXCEPTION 'Acesso negado: Somente gerentes ou funcionarios da filial de destino podem concluir a transferencia.';
   END IF;
 
-  -- Obter qtd_minima do produto
-  SELECT qtd_minima INTO v_prod_qtd_minima FROM public.produtos WHERE id = v_transf.produto_id LIMIT 1;
-
   -- 2. Advisory Lock determinístico em ordem de ID de filial para prevenir deadlock entre origem e destino
   IF v_transf.origem_id < v_transf.destino_id THEN
-    PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtext(v_transf.origem_id::text || '_' || v_transf.produto_id::text));
-    PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtext(v_transf.destino_id::text || '_' || v_transf.produto_id::text));
+    PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(v_transf.origem_id::text || ':' || v_transf.produto_id::text, 0));
+    PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(v_transf.destino_id::text || ':' || v_transf.produto_id::text, 0));
   ELSE
-    PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtext(v_transf.destino_id::text || '_' || v_transf.produto_id::text));
-    PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtext(v_transf.origem_id::text || '_' || v_transf.produto_id::text));
+    PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(v_transf.destino_id::text || ':' || v_transf.produto_id::text, 0));
+    PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(v_transf.origem_id::text || ':' || v_transf.produto_id::text, 0));
   END IF;
 
   -- 3. Validar e bloquear estoque da origem (SELECT FOR UPDATE)
@@ -704,8 +736,9 @@ BEGIN
   v_origem_qtd_nova := v_origem_qtd_ant - v_transf.quantidade;
   v_origem_status := CASE
     WHEN v_origem_qtd_nova = 0 THEN 'zerado'
-    WHEN v_origem_qtd_nova <= COALESCE(v_prod_qtd_minima, 0) THEN 'baixo'
-    ELSE 'suficiente'
+    WHEN v_origem_qtd_nova < 20 THEN 'baixo'
+    WHEN v_origem_qtd_nova <= 50 THEN 'suficiente'
+    ELSE 'suficiente+'
   END;
 
   -- 4. Bloquear e calcular estoque do destino
@@ -714,11 +747,15 @@ BEGIN
     0
   ) INTO v_dest_qtd_ant;
 
+  IF v_transf.quantidade > 2147483647 - v_dest_qtd_ant THEN
+    RAISE EXCEPTION 'Operacao negada: O estoque de destino ultrapassaria o limite maximo de INTEGER (2147483647).';
+  END IF;
   v_dest_qtd_nova := v_dest_qtd_ant + v_transf.quantidade;
   v_dest_status := CASE
     WHEN v_dest_qtd_nova = 0 THEN 'zerado'
-    WHEN v_dest_qtd_nova <= COALESCE(v_prod_qtd_minima, 0) THEN 'baixo'
-    ELSE 'suficiente'
+    WHEN v_dest_qtd_nova < 20 THEN 'baixo'
+    WHEN v_dest_qtd_nova <= 50 THEN 'suficiente'
+    ELSE 'suficiente+'
   END;
 
   -- 5. Atualizar estoque da origem com status padronizado
@@ -832,7 +869,6 @@ DECLARE
   v_user_cargo text;
   v_user_filial_id bigint;
   v_items_count integer;
-  v_prod_qtd_minima integer;
   v_dest_qtd_ant integer;
   v_dest_qtd_nova integer;
   v_dest_status text;
@@ -936,10 +972,8 @@ BEGIN
       RAISE EXCEPTION 'Operacao negada: Item ID % possui quantidade invalida (%).', v_item.id, v_item.quantidade;
     END IF;
 
-    SELECT qtd_minima INTO v_prod_qtd_minima FROM public.produtos WHERE id = v_item.produto_id LIMIT 1;
-
     -- Advisory Lock transacional por chave de produto/filial
-    PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtext(v_pedido.filial_id::text || '_' || v_item.produto_id::text));
+    PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(v_pedido.filial_id::text || ':' || v_item.produto_id::text, 0));
 
     -- Obter e bloquear estoque anterior
     SELECT COALESCE(
@@ -947,11 +981,15 @@ BEGIN
       0
     ) INTO v_dest_qtd_ant;
 
+    IF v_item.quantidade > 2147483647 - v_dest_qtd_ant THEN
+      RAISE EXCEPTION 'Operacao negada: O recebimento do produto % ultrapassaria o limite maximo de INTEGER (2147483647).', v_item.produto_id;
+    END IF;
     v_dest_qtd_nova := v_dest_qtd_ant + v_item.quantidade;
     v_dest_status := CASE
       WHEN v_dest_qtd_nova = 0 THEN 'zerado'
-      WHEN v_dest_qtd_nova <= COALESCE(v_prod_qtd_minima, 0) THEN 'baixo'
-      ELSE 'suficiente'
+      WHEN v_dest_qtd_nova < 20 THEN 'baixo'
+      WHEN v_dest_qtd_nova <= 50 THEN 'suficiente'
+      ELSE 'suficiente+'
     END;
 
     -- Incrementar estoque com status padronizado
@@ -1078,8 +1116,8 @@ BEGIN
   RETURNING id INTO v_pedido_id;
 
   -- Inserir o item do pedido
-  INSERT INTO public.itens_pedido_compra (pedido_id, produto_id, quantidade, created_at)
-  VALUES (v_pedido_id, p_produto_id, p_quantidade, now());
+  INSERT INTO public.itens_pedido_compra (pedido_id, produto_id, quantidade)
+  VALUES (v_pedido_id, p_produto_id, p_quantidade);
 
   v_resultado := json_build_object(
     'success', true,
@@ -1152,9 +1190,8 @@ BEGIN
   IF p_sku IS NULL OR TRIM(p_sku) = '' THEN
     RAISE EXCEPTION 'Operacao negada: SKU/Codigo do produto e obrigatorio.';
   END IF;
-  IF p_qtd_minima IS NULL OR p_qtd_minima < 0 THEN
-    RAISE EXCEPTION 'Operacao negada: Quantidade minima deve ser um inteiro maior ou igual a zero.';
-  END IF;
+  -- p_categoria e p_qtd_minima permanecem na assinatura apenas por compatibilidade
+  -- com clientes antigos; categoria e status são derivados no banco, e qtd_minima é legado.
 
   -- Checagem de Idempotência
   IF p_idempotency_key IS NULL OR TRIM(p_idempotency_key) = '' THEN
@@ -1166,7 +1203,7 @@ BEGIN
   END IF;
 
   PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtext('idempotency:' || p_idempotency_key));
-  v_params_hash := md5('cadastrar_produto:' || TRIM(p_nome) || ':' || TRIM(p_sku) || ':' || COALESCE(p_categoria, 'Geral') || ':' || p_qtd_minima::text);
+  v_params_hash := md5('cadastrar_produto:' || TRIM(p_nome) || ':' || TRIM(p_sku));
 
   SELECT * INTO v_idempotent_rec
   FROM public.idempotencia_chaves
@@ -1186,13 +1223,13 @@ BEGIN
     END IF;
   END IF;
 
-  -- Verificar se exatamente as 5 filiais oficiais (IDs 1 a 5) existem
+  -- Verificar se as cinco filiais oficiais existem e estão ativas.
   SELECT count(*) INTO v_filial_count
   FROM public.filiais
-  WHERE id IN (1, 2, 3, 4, 5);
+  WHERE id IN (1, 2, 3, 4, 5) AND ativa IS TRUE;
 
-  IF v_filial_count < 5 THEN
-    RAISE EXCEPTION 'Operacao negada: Filiais oficiais (1 a 5) nao foram encontradas no sistema.';
+  IF v_filial_count <> 5 THEN
+    RAISE EXCEPTION 'Operacao negada: Todas as cinco filiais oficiais (IDs 1 a 5) precisam existir e estar ativas.';
   END IF;
 
   -- Derivar e validar categoria oficial do produto a partir do nome
@@ -1212,7 +1249,7 @@ BEGIN
     -- Inserir o novo produto no catálogo global com a categoria derivada em descricao
     BEGIN
       INSERT INTO public.produtos (nome, codigo, descricao, qtd_minima, unidade_medida, ativo, created_at)
-      VALUES (TRIM(p_nome), TRIM(p_sku), v_cat_derivada, p_qtd_minima, 'unidade', true, now())
+      VALUES (TRIM(p_nome), TRIM(p_sku), v_cat_derivada, 0, 'unidade', true, now())
       RETURNING id INTO v_prod_id;
     EXCEPTION
       WHEN unique_violation THEN
@@ -1221,12 +1258,21 @@ BEGIN
   END;
 
   -- Criar exatamente 1 registro de estoque inicial (quantidade = 0) para cada uma das 5 filiais oficiais
+  v_filial_count := 0;
   FOR v_filial_rec IN
-    SELECT id FROM public.filiais WHERE id IN (1, 2, 3, 4, 5) ORDER BY id ASC
+    SELECT id FROM public.filiais
+    WHERE id IN (1, 2, 3, 4, 5) AND ativa IS TRUE
+    ORDER BY id ASC
+    FOR SHARE
   LOOP
     INSERT INTO public.estoques (filial_id, produto_id, quantidade, status, updated_at)
     VALUES (v_filial_rec.id, v_prod_id, 0, 'zerado'::public.status_estoque, now());
+    v_filial_count := v_filial_count + 1;
   END LOOP;
+
+  IF v_filial_count <> 5 THEN
+    RAISE EXCEPTION 'Operacao negada: Nao foi possivel confirmar estoque inicial para as cinco filiais ativas; a transacao sera revertida.';
+  END IF;
 
   v_resultado := json_build_object(
     'success', true,

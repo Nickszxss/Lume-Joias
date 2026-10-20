@@ -171,7 +171,7 @@ function resolverMockLocal(path, options) {
       origem_id: body.origemId, origemNome: orig?.nome,
       destino_id: body.destinoId, destinoNome: dest?.nome,
       quantidade: body.quantidade, solicitante: body.solicitante,
-      data: new Date().toLocaleDateString('pt-BR'), status: 'pendente'
+      data: new Date().toLocaleDateString('pt-BR'), status: 'solicitada'
     };
     mockTransferencias.unshift(novaT);
     return novaT;
@@ -260,7 +260,7 @@ function resolverMockLocal(path, options) {
       totalProdutos: mockProdutos.length,
       totalBaixo,
       totalZerado,
-      totalTransferenciasPendentes: mockTransferencias.filter(t => t.status === 'pendente').length,
+      totalTransferenciasPendentes: mockTransferencias.filter(t => t.status === 'solicitada').length,
       estoquePorFilial,
       movimentacoesSemana: { labels: ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'], entradas: [12, 19, 3, 5, 2, 3, 10], saidas: [2, 3, 20, 5, 1, 4, 8] },
       alertas: mockEstoques.filter(e => e.status === 'baixo' || e.status === 'zerado').map(e => ({
@@ -610,7 +610,7 @@ const api = {
         destino_id: dados.destinoId,
         quantidade: dados.quantidade,
         usuario_id: usuario ? usuario.id : null,
-        status: 'pendente',
+        status: 'solicitada',
         created_at: new Date().toISOString()
       };
       const { data, error } = await client.from('transferencias').insert([payload]).select().single();
@@ -624,7 +624,7 @@ const api = {
           quantidade: data.quantidade,
           solicitante: usuario ? usuario.nome : 'Solicitante',
           data: new Date().toLocaleDateString('pt-BR'),
-          status: 'pendente'
+          status: 'solicitada'
         };
       } else if (error) {
         throw new Error(error.message || 'Erro ao criar transferência no Supabase.');
@@ -876,8 +876,8 @@ const api = {
         }));
 
         const filteredT = (usuario && usuario.tipo === 'funcionario' && usuario.filial_id)
-          ? (listT ? listT.filter(t => (String(t.origem_id) === String(usuario.filial_id) || String(t.destino_id) === String(usuario.filial_id)) && (t.status === 'solicitada' || t.status === 'pendente')) : [])
-          : (listT ? listT.filter(t => t.status === 'solicitada' || t.status === 'pendente') : []);
+          ? (listT ? listT.filter(t => (String(t.origem_id) === String(usuario.filial_id) || String(t.destino_id) === String(usuario.filial_id)) && t.status === 'solicitada') : [])
+          : (listT ? listT.filter(t => t.status === 'solicitada') : []);
 
         const diasSemana = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
         const hoje = new Date();
@@ -1987,7 +1987,7 @@ function pintarTransferencias(){
   tb.innerHTML = transferencias.length === 0
     ? '<tr><td colspan="9" class="empty-state">Nenhuma transferência registrada.</td></tr>'
     : transferencias.map(t => {
-      const pender = t.status === 'solicitada' || t.status === 'pendente';
+      const pender = t.status === 'solicitada';
       const tDestinoId = t.destino_id || t.destino_filial_id;
       const podeConcluir = usuario && (usuario.tipo === 'gerente' || String(tDestinoId) === String(usuario.filial_id));
 

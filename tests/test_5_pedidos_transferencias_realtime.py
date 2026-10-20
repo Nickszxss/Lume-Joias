@@ -1,6 +1,18 @@
 import asyncio
 from playwright.async_api import async_playwright
 
+def test_validar_status_transferencias_solicitada_main_js():
+    with open("main.js", "r", encoding="utf-8") as f:
+        js = f.read()
+
+    # Inserção e retorno de transferências devem utilizar 'solicitada'
+    assert "status: 'solicitada'" in js
+    assert "status: 'pendente'" not in js
+
+    # Filtros e lógica de renderização de transferências
+    assert "t.status === 'solicitada'" in js
+    assert "const pender = t.status === 'solicitada';" in js
+
 async def test_pedidos_transferencias_realtime():
     print("=== TESTE CONSOLIDADO 5: PEDIDOS, TRANSFERÊNCIAS E REALTIME ===")
     async with async_playwright() as p:
@@ -46,4 +58,5 @@ async def test_pedidos_transferencias_realtime():
         await browser.close()
 
 if __name__ == "__main__":
+    test_validar_status_transferencias_solicitada_main_js()
     asyncio.run(test_pedidos_transferencias_realtime())

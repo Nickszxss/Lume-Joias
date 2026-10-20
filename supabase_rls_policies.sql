@@ -86,6 +86,7 @@ END $$;
 CREATE OR REPLACE FUNCTION public.atualizar_status_estoque()
 RETURNS trigger
 LANGUAGE plpgsql
+SECURITY DEFINER
 SET search_path = ''
 AS $$
 BEGIN
@@ -799,7 +800,6 @@ BEGIN
 END;
 $$;
 
-REVOKE EXECUTE ON FUNCTION public.concluir_transferencia_rpc(bigint, text) FROM PUBLIC, anon;
 REVOKE EXECUTE ON FUNCTION public.concluir_transferencia_rpc(bigint, text, text) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.concluir_transferencia_rpc(bigint, text, text) TO authenticated;
 
@@ -1301,11 +1301,9 @@ GRANT EXECUTE ON FUNCTION public.criar_pedido_compra_rpc(bigint, bigint, integer
 REVOKE EXECUTE ON FUNCTION public.ajustar_estoque_rpc(bigint, bigint, text, integer, text, text) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.ajustar_estoque_rpc(bigint, bigint, text, integer, text, text) TO authenticated;
 
-REVOKE EXECUTE ON FUNCTION public.concluir_transferencia_rpc(bigint, text) FROM PUBLIC, anon;
 REVOKE EXECUTE ON FUNCTION public.concluir_transferencia_rpc(bigint, text, text) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.concluir_transferencia_rpc(bigint, text, text) TO authenticated;
 
-REVOKE EXECUTE ON FUNCTION public.receber_pedido_rpc(bigint, text) FROM PUBLIC, anon;
 REVOKE EXECUTE ON FUNCTION public.receber_pedido_rpc(bigint, text, text) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.receber_pedido_rpc(bigint, text, text) TO authenticated;
 

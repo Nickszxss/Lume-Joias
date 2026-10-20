@@ -1,12 +1,14 @@
 -- =====================================================================
--- SCRIPT DE MIGRAÇÃO DEDICADO — LUME JOIAS
--- Objeto: Proteção Estrita contra Saídas Acima do Saldo Disponível em Estoque
--- Arquitetura: Supabase PostgreSQL (Ajuste Manual e Transferências)
+-- SCRIPT DE MIGRAÇÃO DEDICADO — LUME JOIAS (v2.1 REVISADO E AJUSTADO)
+-- Objeto: Proteção Estrita contra Saídas Acima do Saldo Disponível em Estoque,
+--         Suporte Completo a Idempotência e Fechamento Rigoroso de Permissões Direct Update.
+-- Arquitetura: Supabase PostgreSQL (Ajuste Manual de Estoque)
 -- =====================================================================
 
 BEGIN;
 
 -- 1. Restrição de Integridade Não-Negativa em public.estoques
+-- Elimina preventivamente ambas as variações de nomes de constraint conhecidas para evitar duplicação.
 DO $$
 DECLARE
     v_negatives_count integer;
@@ -15,15 +17,17 @@ BEGIN
     IF v_negatives_count > 0 THEN
         RAISE EXCEPTION 'ERRO DE SEGURANÇA: Existem % registros com quantidade negativa na tabela public.estoques. A constraint CHECK (quantidade >= 0) nao pode ser aplicada. Regularize os saldos antes de reexecutar o script.', v_negatives_count;
     ELSE
+        ALTER TABLE public.estoques DROP CONSTRAINT IF EXISTS quantidade_nao_negativa;
         ALTER TABLE public.estoques DROP CONSTRAINT IF EXISTS estoques_quantidade_nonnegative;
         ALTER TABLE public.estoques ADD CONSTRAINT estoques_quantidade_nonnegative CHECK (quantidade >= 0);
     END IF;
 END $$;
 
--- 2. Fechamento de UPDATE direto sobre public.estoques
+-- 2. Fechamento de UPDATE direto e amplo sobre public.estoques
+REVOKE UPDATE ON public.estoques FROM PUBLIC, anon, authenticated;
 REVOKE UPDATE (id, filial_id, produto_id, quantidade, status, updated_at) ON public.estoques FROM PUBLIC, anon, authenticated;
 
--- 3. RPC Transacional Atômico para Ajuste de Estoque com Proteção de Saldo
+-- 3. RPC Transacional Atômico para Ajuste de Estoque com Suporte Completo a Idempotência
 CREATE OR REPLACE FUNCTION public.ajustar_estoque_rpc(
   p_produto_id bigint,
   p_filial_id bigint,
@@ -74,12 +78,42 @@ BEGIN
   FROM public.usuarios
   WHERE auth_user_id = v_auth_uid AND ativo = true;
 
-  -- Permissão por Filial
+  -- Regra P0 de Autorização Estrita por Filial
   IF v_user_filial_id IS NULL OR v_user_filial_id != p_filial_id THEN
     RAISE EXCEPTION 'Acesso negado: Usuario nao possui permissao para ajustar o estoque de outra filial (Filial Alvo: %, Sua Filial: %).', p_filial_id, v_user_filial_id;
   END IF;
 
-  -- 2. Validação Estrita de Parâmetros de Entrada
+  -- 2. Checagem e Processamento de Idempotência
+  IF p_idempotency_key IS NULL OR TRIM(p_idempotency_key) = '' THEN
+    RAISE EXCEPTION 'Operacao negada: Chave de idempotencia e obrigatoria para esta operacao.';
+  END IF;
+
+  IF LENGTH(p_idempotency_key) > 255 THEN
+    RAISE EXCEPTION 'Operacao negada: Chave de idempotencia excede o tamanho maximo permitido (255 caracteres).';
+  END IF;
+
+  PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtext('idempotency:' || p_idempotency_key));
+  v_params_hash := md5('ajustar_estoque:' || COALESCE(p_produto_id::text, '') || ':' || COALESCE(p_filial_id::text, '') || ':' || COALESCE(p_tipo, '') || ':' || COALESCE(p_quantidade::text, '') || ':' || COALESCE(p_motivo, ''));
+
+  SELECT * INTO v_idempotent_rec
+  FROM public.idempotencia_chaves
+  WHERE chave = p_idempotency_key;
+
+  IF FOUND THEN
+    IF v_idempotent_rec.usuario_id IS DISTINCT FROM v_user_id THEN
+      RAISE EXCEPTION 'Acesso negado: A chave de idempotencia % pertence a outro usuario.', p_idempotency_key;
+    END IF;
+    IF v_idempotent_rec.escopo IS DISTINCT FROM 'ajustar_estoque' THEN
+      RAISE EXCEPTION 'Operacao negada: A chave de idempotencia % ja foi utilizada em outro escopo (%).', p_idempotency_key, v_idempotent_rec.escopo;
+    END IF;
+    IF v_idempotent_rec.parametros_hash = v_params_hash THEN
+      RETURN v_idempotent_rec.resultado_json;
+    ELSE
+      RAISE EXCEPTION 'Operacao negada: A chave de idempotencia % ja foi utilizada com parametros diferentes.', p_idempotency_key;
+    END IF;
+  END IF;
+
+  -- 3. Validação Estrita de Parâmetros de Entrada
   IF p_produto_id IS NULL THEN
     RAISE EXCEPTION 'Operacao negada: ID do produto e obrigatorio.';
   END IF;
@@ -96,7 +130,7 @@ BEGIN
     RAISE EXCEPTION 'Operacao negada: Motivo do ajuste de estoque e obrigatorio.';
   END IF;
 
-  -- 3. Validação de Filial e Produto Ativos
+  -- 4. Validação de Filial e Produto Ativos
   SELECT ativa INTO v_filial_ativa FROM public.filiais WHERE id = p_filial_id LIMIT 1;
   IF v_filial_ativa IS NULL THEN
     RAISE EXCEPTION 'Operacao negada: Filial ID % nao encontrada.', p_filial_id;
@@ -113,7 +147,7 @@ BEGIN
     RAISE EXCEPTION 'Operacao negada: Produto ID % esta inativo e nao pode receber ajustes de estoque.', p_produto_id;
   END IF;
 
-  -- 4. Trava Contra Concorrência (Advisory Lock + SELECT FOR UPDATE)
+  -- 5. Trava Contra Concorrência (Advisory Lock + SELECT FOR UPDATE)
   v_lock_key := pg_catalog.hashtext(p_filial_id::text || '_' || p_produto_id::text);
   PERFORM pg_catalog.pg_advisory_xact_lock(v_lock_key);
 
@@ -126,7 +160,7 @@ BEGIN
     v_qtd_ant := 0;
   END IF;
 
-  -- 5. Validação do Saldo para Operações de Saída
+  -- 6. Validação do Saldo para Operações de Saída
   IF p_tipo = 'saida' THEN
     IF v_qtd_ant < p_quantidade THEN
       RAISE EXCEPTION 'Saldo insuficiente na filial para realizar a saida (disponivel: %, solicitado: %).', v_qtd_ant, p_quantidade;
@@ -143,7 +177,7 @@ BEGIN
     ELSE 'suficiente'
   END;
 
-  -- 6. Atualização Atômica do Saldo
+  -- 7. Atualização Atômica do Saldo
   INSERT INTO public.estoques (filial_id, produto_id, quantidade, status, updated_at)
   VALUES (p_filial_id, p_produto_id, v_qtd_nova, v_status::public.status_estoque, now())
   ON CONFLICT (filial_id, produto_id) DO UPDATE
@@ -151,7 +185,7 @@ BEGIN
       status = EXCLUDED.status,
       updated_at = now();
 
-  -- 7. Registro de Movimentação Auditável
+  -- 8. Registro de Movimentação Auditável
   INSERT INTO public.movimentacoes (produto_id, filial_id, usuario_id, tipo, quantidade, quantidade_anterior, quantidade_nova, motivo, created_at)
   VALUES (p_produto_id, p_filial_id, v_user_id, p_tipo, p_quantidade, v_qtd_ant, v_qtd_nova, COALESCE(p_motivo, 'Ajuste manual de estoque'), now());
 
@@ -161,6 +195,13 @@ BEGIN
     'quantidade_anterior', v_qtd_ant,
     'quantidade_nova', v_qtd_nova
   );
+
+  -- 9. Persistência de Chave de Idempotência
+  IF p_idempotency_key IS NOT NULL AND TRIM(p_idempotency_key) != '' THEN
+    INSERT INTO public.idempotencia_chaves (chave, usuario_id, escopo, parametros_hash, resultado_json)
+    VALUES (p_idempotency_key, v_user_id, 'ajustar_estoque', v_params_hash, v_resultado)
+    ON CONFLICT (chave) DO NOTHING;
+  END IF;
 
   RETURN v_resultado;
 END;

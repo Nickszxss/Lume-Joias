@@ -1,7 +1,7 @@
 -- =====================================================================
--- SCRIPT DE MIGRAÇÃO DEDICADO — LUME JOIAS (v2.2 OFICIAL E AJUSTADO)
+-- SCRIPT DE MIGRAÇÃO DEDICADO — LUME JOIAS (v2.4 OFICIAL E AJUSTADO)
 -- Objeto: Proteção Estrita contra Saídas Acima do Saldo Disponível em Estoque,
---         Suporte Completo a Idempotência e Fechamento Rigoroso de Permissões Direct Update.
+--         Harmonização de Locks de Concorrência, Suporte a Idempotência e Fechamento Rigoroso de Permissões Direct Update.
 -- Arquitetura: Supabase PostgreSQL (Ajuste Manual de Estoque)
 -- =====================================================================
 
@@ -27,7 +27,7 @@ END $$;
 REVOKE UPDATE ON public.estoques FROM PUBLIC, anon, authenticated;
 REVOKE UPDATE (id, filial_id, produto_id, quantidade, status, updated_at) ON public.estoques FROM PUBLIC, anon, authenticated;
 
--- 3. RPC Transacional Atômico para Ajuste de Estoque com Suporte Completo a Idempotência
+-- 3. RPC Transacional Atômico para Ajuste de Estoque com Suporte Completo a Idempotência e Locks Harmonizados
 CREATE OR REPLACE FUNCTION public.ajustar_estoque_rpc(
   p_produto_id bigint,
   p_filial_id bigint,
@@ -147,10 +147,10 @@ BEGIN
     RAISE EXCEPTION 'Operacao negada: Produto ID % esta inativo e nao pode receber ajustes de estoque.', p_produto_id;
   END IF;
 
-  -- 5. Trava Determinística de Concorrência (Advisory Lock Transacional por Par Filial/Produto + SELECT FOR UPDATE)
-  -- Garante que duas transações simultâneas para um registro que ainda não existe em public.estoques sejam estritamente serializadas.
-  v_lock_key := pg_catalog.hashtext('estoque_lock:' || p_filial_id::text || '_' || p_produto_id::text);
-  PERFORM pg_catalog.pg_advisory_xact_lock(v_lock_key);
+  -- 5. Trava Determinística e Padronizada de Concorrência
+  -- Utiliza a convenção exata da base de dados: hashtextextended(filial_id::text || ':' || produto_id::text, 0)
+  -- Garante sincronização perfeita e serialização entre ajustes manuais, conclusões de transferência e recebimentos de pedidos.
+  PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(p_filial_id::text || ':' || p_produto_id::text, 0));
 
   SELECT quantidade INTO v_qtd_ant
   FROM public.estoques

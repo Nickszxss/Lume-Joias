@@ -1136,12 +1136,16 @@ END;
 $$;
 
 -- RPC Transacional Atômico para Cadastrar Produto e Criar Estoque Inicial em 5 Filiais
+DROP FUNCTION IF EXISTS public.cadastrar_produto_com_estoques_rpc(text, text, text, integer, text);
+
 CREATE OR REPLACE FUNCTION public.cadastrar_produto_com_estoques_rpc(
   p_nome text,
   p_sku text,
   p_categoria text DEFAULT 'Geral',
   p_qtd_minima integer DEFAULT 10,
-  p_idempotency_key text DEFAULT NULL
+  p_idempotency_key text DEFAULT NULL,
+  p_quantidade integer DEFAULT 0,
+  p_filiais_ids integer[] DEFAULT ARRAY[1, 2, 3, 4, 5]
 )
 RETURNS json
 LANGUAGE plpgsql
@@ -1157,9 +1161,11 @@ DECLARE
   v_prod_id bigint;
   v_filial_rec record;
   v_filial_count integer;
+  v_distinct_filiais_count integer;
   v_params_hash text;
   v_idempotent_rec record;
   v_resultado json;
+  v_status public.status_estoque;
 BEGIN
   v_auth_uid := auth.uid();
   IF v_auth_uid IS NULL THEN
@@ -1187,11 +1193,31 @@ BEGIN
   IF p_nome IS NULL OR TRIM(p_nome) = '' THEN
     RAISE EXCEPTION 'Operacao negada: Nome do produto e obrigatorio.';
   END IF;
+
   IF p_sku IS NULL OR TRIM(p_sku) = '' THEN
     RAISE EXCEPTION 'Operacao negada: SKU/Codigo do produto e obrigatorio.';
   END IF;
-  -- p_categoria e p_qtd_minima permanecem na assinatura apenas por compatibilidade
-  -- com clientes antigos; categoria e status são derivados no banco, e qtd_minima é legado.
+
+  -- Validação de quantidade (0 a 50)
+  IF p_quantidade IS NULL OR p_quantidade < 0 OR p_quantidade > 50 THEN
+    RAISE EXCEPTION 'Operacao negada: Quantidade deve ser um numero inteiro entre 0 e 50.';
+  END IF;
+
+  -- Validação de filiais selecionadas
+  IF p_filiais_ids IS NULL OR array_length(p_filiais_ids, 1) IS NULL OR array_length(p_filiais_ids, 1) = 0 THEN
+    RAISE EXCEPTION 'Operacao negada: Selecione pelo menos uma filial.';
+  END IF;
+
+  SELECT count(DISTINCT f) INTO v_distinct_filiais_count
+  FROM unnest(p_filiais_ids) AS f;
+
+  SELECT count(DISTINCT id) INTO v_filial_count
+  FROM public.filiais
+  WHERE id = ANY(p_filiais_ids) AND ativa IS TRUE;
+
+  IF v_filial_count <> v_distinct_filiais_count THEN
+    RAISE EXCEPTION 'Operacao negada: Uma ou mais filiais selecionadas sao invalidas ou inativas.';
+  END IF;
 
   -- Checagem de Idempotência
   IF p_idempotency_key IS NULL OR TRIM(p_idempotency_key) = '' THEN
@@ -1203,7 +1229,10 @@ BEGIN
   END IF;
 
   PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtext('idempotency:' || p_idempotency_key));
-  v_params_hash := md5('cadastrar_produto:' || TRIM(p_nome) || ':' || TRIM(p_sku));
+
+  SELECT md5('cadastrar_produto:' || TRIM(p_nome) || ':' || TRIM(p_sku) || ':' || p_quantidade::text || ':' || string_agg(f::text, ',' ORDER BY f))
+  INTO v_params_hash
+  FROM unnest(p_filiais_ids) AS f;
 
   SELECT * INTO v_idempotent_rec
   FROM public.idempotencia_chaves
@@ -1221,15 +1250,6 @@ BEGIN
     ELSE
       RAISE EXCEPTION 'Operacao negada: A chave de idempotencia % ja foi utilizada com parametros diferentes.', p_idempotency_key;
     END IF;
-  END IF;
-
-  -- Verificar se as cinco filiais oficiais existem e estão ativas.
-  SELECT count(*) INTO v_filial_count
-  FROM public.filiais
-  WHERE id IN (1, 2, 3, 4, 5) AND ativa IS TRUE;
-
-  IF v_filial_count <> 5 THEN
-    RAISE EXCEPTION 'Operacao negada: Todas as cinco filiais oficiais (IDs 1 a 5) precisam existir e estar ativas.';
   END IF;
 
   -- Derivar e validar categoria oficial do produto a partir do nome
@@ -1257,29 +1277,44 @@ BEGIN
     END;
   END;
 
-  -- Criar exatamente 1 registro de estoque inicial (quantidade = 0) para cada uma das 5 filiais oficiais
+  -- Criar registros de estoque APENAS para as filiais selecionadas
   v_filial_count := 0;
   FOR v_filial_rec IN
-    SELECT id FROM public.filiais
-    WHERE id IN (1, 2, 3, 4, 5) AND ativa IS TRUE
+    SELECT DISTINCT id FROM public.filiais
+    WHERE id = ANY(p_filiais_ids) AND ativa IS TRUE
     ORDER BY id ASC
     FOR SHARE
   LOOP
+    v_status := CASE
+      WHEN p_quantidade = 0 THEN 'zerado'::public.status_estoque
+      WHEN p_quantidade < 20 THEN 'baixo'::public.status_estoque
+      WHEN p_quantidade <= 50 THEN 'suficiente'::public.status_estoque
+      ELSE 'suficiente+'::public.status_estoque
+    END;
+
     INSERT INTO public.estoques (filial_id, produto_id, quantidade, status, updated_at)
-    VALUES (v_filial_rec.id, v_prod_id, 0, 'zerado'::public.status_estoque, now());
+    VALUES (v_filial_rec.id, v_prod_id, p_quantidade, v_status, now());
+
+    IF p_quantidade > 0 THEN
+      INSERT INTO public.movimentacoes (produto_id, filial_id, usuario_id, tipo, quantidade, quantidade_anterior, quantidade_nova, motivo, created_at)
+      VALUES (v_prod_id, v_filial_rec.id, v_user_id, 'entrada'::public.tipo_movimentacao, p_quantidade, 0, p_quantidade, 'Cadastro inicial de produto', now());
+    END IF;
+
     v_filial_count := v_filial_count + 1;
   END LOOP;
 
-  IF v_filial_count <> 5 THEN
-    RAISE EXCEPTION 'Operacao negada: Nao foi possivel confirmar estoque inicial para as cinco filiais ativas; a transacao sera revertida.';
+  IF v_filial_count <> v_distinct_filiais_count THEN
+    RAISE EXCEPTION 'Operacao negada: Nao foi possivel confirmar estoque inicial para as filiais selecionadas; a transacao sera revertida.';
   END IF;
 
   v_resultado := json_build_object(
     'success', true,
-    'message', 'Produto cadastrado com sucesso com estoque inicial nas 5 filiais.',
+    'message', 'Produto cadastrado com sucesso com estoque inicial nas filiais selecionadas.',
     'produto_id', v_prod_id,
     'sku', TRIM(p_sku),
-    'nome', TRIM(p_nome)
+    'nome', TRIM(p_nome),
+    'quantidade', p_quantidade,
+    'filiais_ids', p_filiais_ids
   );
 
   IF p_idempotency_key IS NOT NULL AND TRIM(p_idempotency_key) != '' THEN
@@ -1292,8 +1327,8 @@ BEGIN
 END;
 $$;
 
-REVOKE EXECUTE ON FUNCTION public.cadastrar_produto_com_estoques_rpc(text, text, text, integer, text) FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.cadastrar_produto_com_estoques_rpc(text, text, text, integer, text) TO authenticated;
+REVOKE EXECUTE ON FUNCTION public.cadastrar_produto_com_estoques_rpc(text, text, text, integer, text, integer, integer[]) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.cadastrar_produto_com_estoques_rpc(text, text, text, integer, text, integer, integer[]) TO authenticated;
 
 REVOKE EXECUTE ON FUNCTION public.criar_pedido_compra_rpc(bigint, bigint, integer, text) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.criar_pedido_compra_rpc(bigint, bigint, integer, text) TO authenticated;

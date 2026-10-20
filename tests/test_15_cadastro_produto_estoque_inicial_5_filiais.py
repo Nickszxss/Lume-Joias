@@ -15,13 +15,13 @@ def load_main_js_content():
 def test_1_rpc_cadastrar_produto_com_estoques_cinco_filiais():
     sql = load_sql_content()
     assert "cadastrar_produto_com_estoques_rpc" in sql
-    assert "WHERE id IN (1, 2, 3, 4, 5)" in sql
+    assert "p_filiais_ids" in sql
     assert "INSERT INTO public.estoques" in sql
-    assert "quantidade, status" in sql or "0, 'zerado'" in sql
 
 def test_2_registros_estoque_inicial_quantidade_zero():
     sql = load_sql_content()
-    assert "VALUES (v_filial_rec.id, v_prod_id, 0, 'zerado'::public.status_estoque, now());" in sql
+    assert "INSERT INTO public.estoques (filial_id, produto_id, quantidade, status, updated_at)" in sql
+    assert "p_quantidade" in sql
 
 def test_3_autorizacao_servidor_perfil_gerente():
     sql = load_sql_content()

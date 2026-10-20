@@ -605,14 +605,14 @@ const api = {
       }
 
       const { data: authData, error: authErr } = await client.auth.getUser();
-      if (authErr || !authData || !authData.user || !authData.user.email) {
+      if (authErr || !authData || !authData.user || !authData.user.id) {
         throw new Error('Sessão inválida ou expirada. Faça login novamente para solicitar a transferência.');
       }
 
       const { data: usuarioDb, error: usuarioErr } = await client
         .from('usuarios')
         .select('id, nome')
-        .eq('email', authData.user.email)
+        .eq('auth_user_id', authData.user.id)
         .eq('ativo', true)
         .single();
 

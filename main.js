@@ -432,9 +432,28 @@ const api = {
       throw new Error('A quantidade deve ser um número inteiro entre 0 e 50.');
     }
 
-    const filiaisIds = Array.isArray(dados.filiaisIds) ? dados.filiaisIds.map(id => parseInt(id, 10)) : [1, 2, 3, 4, 5];
-    if (filiaisIds.length === 0) {
+    if (!dados.filiaisIds || !Array.isArray(dados.filiaisIds)) {
       throw new Error('Selecione pelo menos uma filial.');
+    }
+
+    if (dados.filiaisIds.length === 0) {
+      throw new Error('Selecione pelo menos uma filial.');
+    }
+
+    const validFiliais = [1, 2, 3, 4, 5];
+    const filiaisIds = [];
+    const seen = new Set();
+
+    for (const rawId of dados.filiaisIds) {
+      const numId = Number(rawId);
+      if (!Number.isInteger(numId) || !validFiliais.includes(numId)) {
+        throw new Error('Uma ou mais filiais selecionadas são inválidas.');
+      }
+      if (seen.has(numId)) {
+        throw new Error('IDs de filiais duplicados não são permitidos.');
+      }
+      seen.add(numId);
+      filiaisIds.push(numId);
     }
 
     const client = getSupabaseClient();
@@ -1711,8 +1730,8 @@ function abrirModalProduto(){
   const container = $('p-filiais-container');
   if (container) {
     container.innerHTML = FILIAIS.map(f => `
-      <label class="filial-checkbox-item selected">
-        <input type="checkbox" class="p-filial-cb" value="${f.id}" checked onchange="toggleFilialCheckboxClass(this)">
+      <label class="filial-checkbox-item">
+        <input type="checkbox" class="p-filial-cb" value="${f.id}" onchange="toggleFilialCheckboxClass(this)">
         <span>${escapeHtml(f.nome)}</span>
       </label>
     `).join('');

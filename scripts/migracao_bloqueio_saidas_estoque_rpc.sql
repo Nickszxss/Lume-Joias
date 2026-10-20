@@ -1,5 +1,5 @@
 -- =====================================================================
--- SCRIPT DE MIGRAÇÃO DEDICADO — LUME JOIAS (v2.1 REVISADO E AJUSTADO)
+-- SCRIPT DE MIGRAÇÃO DEDICADO — LUME JOIAS (v2.2 OFICIAL E AJUSTADO)
 -- Objeto: Proteção Estrita contra Saídas Acima do Saldo Disponível em Estoque,
 --         Suporte Completo a Idempotência e Fechamento Rigoroso de Permissões Direct Update.
 -- Arquitetura: Supabase PostgreSQL (Ajuste Manual de Estoque)
@@ -147,8 +147,9 @@ BEGIN
     RAISE EXCEPTION 'Operacao negada: Produto ID % esta inativo e nao pode receber ajustes de estoque.', p_produto_id;
   END IF;
 
-  -- 5. Trava Contra Concorrência (Advisory Lock + SELECT FOR UPDATE)
-  v_lock_key := pg_catalog.hashtext(p_filial_id::text || '_' || p_produto_id::text);
+  -- 5. Trava Determinística de Concorrência (Advisory Lock Transacional por Par Filial/Produto + SELECT FOR UPDATE)
+  -- Garante que duas transações simultâneas para um registro que ainda não existe em public.estoques sejam estritamente serializadas.
+  v_lock_key := pg_catalog.hashtext('estoque_lock:' || p_filial_id::text || '_' || p_produto_id::text);
   PERFORM pg_catalog.pg_advisory_xact_lock(v_lock_key);
 
   SELECT quantidade INTO v_qtd_ant
@@ -170,7 +171,7 @@ BEGIN
     v_qtd_nova := v_qtd_ant + p_quantidade;
   END IF;
 
-  -- Calcular status do estoque
+  -- Calcular status do estoque com base na quantidade mínima
   v_status := CASE
     WHEN v_qtd_nova = 0 THEN 'zerado'
     WHEN v_qtd_nova <= COALESCE(v_qtd_minima, 0) THEN 'baixo'
@@ -185,7 +186,7 @@ BEGIN
       status = EXCLUDED.status,
       updated_at = now();
 
-  -- 8. Registro de Movimentação Auditável
+  -- 8. Registro de Movimentação Auditável na Mesma Transação
   INSERT INTO public.movimentacoes (produto_id, filial_id, usuario_id, tipo, quantidade, quantidade_anterior, quantidade_nova, motivo, created_at)
   VALUES (p_produto_id, p_filial_id, v_user_id, p_tipo, p_quantidade, v_qtd_ant, v_qtd_nova, COALESCE(p_motivo, 'Ajuste manual de estoque'), now());
 
@@ -196,7 +197,7 @@ BEGIN
     'quantidade_nova', v_qtd_nova
   );
 
-  -- 9. Persistência de Chave de Idempotência
+  -- 9. Persistência da Chave de Idempotência
   IF p_idempotency_key IS NOT NULL AND TRIM(p_idempotency_key) != '' THEN
     INSERT INTO public.idempotencia_chaves (chave, usuario_id, escopo, parametros_hash, resultado_json)
     VALUES (p_idempotency_key, v_user_id, 'ajustar_estoque', v_params_hash, v_resultado)
